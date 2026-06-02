@@ -1,0 +1,537 @@
+# Product Requirements Document (PRD)
+
+# Product Name
+
+WhatsApp Community Growth Manager
+
+# Version
+
+MVP 1.0
+
+# Overview
+
+WhatsApp Community Growth Manager is a web application that connects to a user's WhatsApp account through Baileys and helps manage contacts, group additions, personalized outreach messages, and campaign tracking from a single dashboard.
+
+The system is designed for business owners, tutors, community managers, creators, and marketers who want to manage WhatsApp communities efficiently.
+
+The platform uses:
+
+* Node.js
+* Express.js
+* Baileys
+* React
+* Tailwind CSS
+* Turso Database
+* Gemini API
+
+---
+
+# Problem Statement
+
+Managing large numbers of WhatsApp contacts manually is time-consuming.
+
+Users often need to:
+
+* Import contacts
+* Organize contacts
+* Add contacts to groups
+* Send personalized messages
+* Monitor outreach performance
+
+Current workflows require repetitive manual actions and lack centralized management.
+
+---
+
+# Goals
+
+## Business Goals
+
+* Simplify WhatsApp community growth
+* Centralize contact management
+* Improve communication efficiency
+* Increase group membership growth
+* Reduce manual work
+
+## User Goals
+
+* Import contacts quickly
+* Manage contact lists
+* Add contacts to groups
+* Send personalized messages
+* Track campaign performance
+
+---
+
+# Target Users
+
+## Primary Users
+
+* Tutors
+* Coaches
+* Business owners
+* Community managers
+* Digital marketers
+
+## Secondary Users
+
+* Event organizers
+* Agency owners
+* Course creators
+* Small businesses
+
+---
+
+# Core Features
+
+# 1. WhatsApp Authentication
+
+## Description
+
+Connect a WhatsApp account securely through QR code scanning.
+
+## Features
+
+* QR code login
+* Connection status
+* Reconnect support
+* Session persistence
+* Logout
+
+---
+
+# 2. Contact Management
+
+## Description
+
+Store and manage target contacts.
+
+## Contact Fields
+
+### Name
+
+Contact display name.
+
+### Phone Number
+
+WhatsApp phone number.
+
+## Features
+
+* Add single contact
+* Bulk paste contacts
+* CSV upload
+* Search contacts
+* Edit contacts
+* Delete contacts
+* Bulk delete contacts
+
+## Example
+
+Name: John Doe
+
+Phone: 2348012345678
+
+---
+
+# 3. Contact Import
+
+## Manual Import
+
+Paste contacts directly.
+
+Example:
+
+John Doe,2348012345678
+
+Mary Smith,2348098765432
+
+## CSV Upload
+
+Supported columns:
+
+name
+
+phone
+
+---
+
+# 4. Group Management
+
+## Description
+
+Manage WhatsApp groups connected to the account.
+
+## Features
+
+* Fetch existing groups
+* View group details
+* Select target group
+* Add contacts to group
+* Track add status
+* View failed additions
+
+## Group Information
+
+* Group Name
+* Group ID
+* Member Count
+
+---
+
+# 5. AI Message Composer
+
+## Description
+
+Use Gemini API to personalize messages before sending.
+
+## Features
+
+* Message templates
+* Variable replacement
+* AI rewriting
+* Tone selection
+* Message preview
+
+## Variables
+
+{{name}}
+
+{{group}}
+
+{{link}}
+
+## Example Template
+
+Hi {{name}},
+
+I run a community where I share valuable updates and opportunities.
+
+Join here:
+
+{{link}}
+
+Gemini generates unique variations while preserving meaning.
+
+---
+
+# 6. Bulk Messaging
+
+## Description
+
+Send messages to selected contacts.
+
+## Features
+
+* Select contacts
+* Select campaign
+* Preview messages
+* Start sending
+* Pause campaign
+* Resume campaign
+* Cancel campaign
+
+## Status Tracking
+
+* Queued
+* Processing
+* Sent
+* Failed
+
+---
+
+# 7. Campaign Management
+
+## Description
+
+Organize outreach into campaigns.
+
+## Campaign Data
+
+* Campaign Name
+* Message Template
+* Contacts
+* Status
+* Start Date
+
+## Campaign Status
+
+* Draft
+* Running
+* Paused
+* Completed
+* Failed
+
+---
+
+# 8. Activity Queue
+
+## Description
+
+All actions are processed through a queue system.
+
+## Supported Actions
+
+* Group additions
+* Message sending
+
+## Queue Features
+
+* Progress monitoring
+* Retry failed actions
+* Pause queue
+* Resume queue
+* Cancel queue
+
+---
+
+# 9. Dashboard
+
+## Overview Cards
+
+### Contacts
+
+Total contacts imported.
+
+### Groups
+
+Connected WhatsApp groups.
+
+### Messages Sent
+
+Messages sent today.
+
+### Campaigns
+
+Active campaigns.
+
+### Success Rate
+
+Successful actions percentage.
+
+---
+
+# 10. Activity Logs
+
+## Description
+
+Track all system activity.
+
+## Log Types
+
+### Message Logs
+
+* Sent
+* Failed
+* Pending
+
+### Group Logs
+
+* Added
+* Failed
+* Pending
+
+### System Logs
+
+* Login
+* Logout
+* Errors
+
+---
+
+# Frontend Requirements
+
+## Technology
+
+React
+
+Tailwind CSS
+
+Shadcn UI
+
+## Pages
+
+### Dashboard
+
+Overview and analytics.
+
+### Contacts
+
+Manage contact lists.
+
+### Groups
+
+Manage groups.
+
+### Campaigns
+
+Create and monitor campaigns.
+
+### Logs
+
+View activity history.
+
+### Settings
+
+Configure application settings.
+
+---
+
+# Backend Requirements
+
+## Technology
+
+Node.js
+
+Express.js
+
+Baileys
+
+## Responsibilities
+
+* WhatsApp connection
+* Session management
+* Contact processing
+* Queue management
+* Database operations
+* API endpoints
+
+---
+
+# Database
+
+## Provider
+
+Turso
+
+## Tables
+
+### contacts
+
+id
+
+name
+
+phone
+
+created_at
+
+### groups
+
+id
+
+group_id
+
+name
+
+created_at
+
+### campaigns
+
+id
+
+name
+
+message_template
+
+status
+
+created_at
+
+### message_logs
+
+id
+
+contact_id
+
+campaign_id
+
+status
+
+sent_at
+
+### group_logs
+
+id
+
+contact_id
+
+group_id
+
+status
+
+created_at
+
+### settings
+
+id
+
+key
+
+value
+
+---
+
+# AI Integration
+
+## Provider
+
+Gemini API
+
+## Functions
+
+* Rewrite messages
+* Personalize messages
+* Generate variations
+* Improve readability
+
+---
+
+# Security
+
+* Protected API routes
+* Session encryption
+* Secure credential storage
+* Database access control
+* Activity logging
+
+---
+
+# MVP Deliverables
+
+Phase 1
+
+✓ WhatsApp QR Login
+
+✓ Contact Import
+
+✓ Contact Management
+
+✓ Group Selection
+
+✓ Group Addition
+
+✓ AI Message Personalization
+
+✓ Bulk Messaging
+
+✓ Campaign Management
+
+✓ Dashboard Analytics
+
+✓ Turso Integration
+
+✓ Gemini Integration
+
+✓ Activity Logs
+
+---
+
+# Success Metrics
+
+* Successful WhatsApp connection
+* Contact import completion rate
+* Campaign completion rate
+* Message delivery success rate
+* Group addition success rate
+* User retention
+* Community growth rate
