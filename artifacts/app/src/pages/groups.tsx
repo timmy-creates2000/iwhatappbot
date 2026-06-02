@@ -1,0 +1,338 @@
+import { useState } from "react";
+import {
+  useListGroups,
+  useCreateGroup,
+  useUpdateGroup,
+  useDeleteGroup,
+  useAddContactsToGroup,
+  useSyncWhatsAppGroups,
+  useListContacts,
+} from "@workspace/api-client-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { Users, Plus, RefreshCw, Trash2, Pencil, UserPlus } from "lucide-react";
+
+interface Group {
+  id: number;
+  name: string;
+  whatsappGroupId?: string | null;
+  description?: string | null;
+  memberCount?: number | null;
+}
+
+export default function Groups() {
+  const { data: groups, isLoading } = useListGroups();
+  const { data: contacts } = useListContacts();
+  const createGroup = useCreateGroup();
+  const updateGroup = useUpdateGroup();
+  const deleteGroup = useDeleteGroup();
+  const syncGroups = useSyncWhatsAppGroups();
+  const addContact = useAddContactsToGroup();
+  const { toast } = useToast();
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [selected, setSelected] = useState<Group | null>(null);
+  const [form, setForm] = useState({ name: "", description: "", whatsappGroupId: "" });
+  const [selectedContactId, setSelectedContactId] = useState("");
+
+  function openAdd() {
+    setForm({ name: "", description: "", whatsappGroupId: "" });
+    setShowAdd(true);
+  }
+
+  function openEdit(g: Group) {
+    setSelected(g);
+    setForm({
+      name: g.name ?? "",
+      description: g.description ?? "",
+      whatsappGroupId: g.whatsappGroupId ?? "",
+    });
+    setShowEdit(true);
+  }
+
+  function openDelete(g: Group) {
+    setSelected(g);
+    setShowDelete(true);
+  }
+
+  function openAddContact(g: Group) {
+    setSelected(g);
+    setSelectedContactId("");
+    setShowAddContact(true);
+  }
+
+  function handleAdd() {
+    if (!form.name) {
+      toast({ title: "Name is required", variant: "destructive" });
+      return;
+    }
+    createGroup.mutate(
+      {
+        data: {
+          name: form.name,
+          groupId: form.whatsappGroupId || undefined,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast({ title: "Group created" });
+          setShowAdd(false);
+        },
+        onError: () => toast({ title: "Failed to create group", variant: "destructive" }),
+      }
+    );
+  }
+
+  function handleEdit() {
+    if (!selected) return;
+    updateGroup.mutate(
+      {
+        id: selected.id,
+        data: {
+          name: form.name,
+          groupId: form.whatsappGroupId || undefined,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast({ title: "Group updated" });
+          setShowEdit(false);
+        },
+        onError: () => toast({ title: "Failed to update", variant: "destructive" }),
+      }
+    );
+  }
+
+  function handleDelete() {
+    if (!selected) return;
+    deleteGroup.mutate(
+      { id: selected.id },
+      {
+        onSuccess: () => {
+          toast({ title: "Group deleted" });
+          setShowDelete(false);
+        },
+        onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
+      }
+    );
+  }
+
+  function handleAddContact() {
+    if (!selected || !selectedContactId) return;
+    addContact.mutate(
+      { id: selected.id, data: { contactIds: [Number(selectedContactId)] } },
+      {
+        onSuccess: () => {
+          toast({ title: "Contact added to group" });
+          setShowAddContact(false);
+        },
+        onError: () => toast({ title: "Failed to add contact", variant: "destructive" }),
+      }
+    );
+  }
+
+  function handleSync() {
+    syncGroups.mutate(undefined, {
+      onSuccess: () => toast({ title: "Groups synced from WhatsApp" }),
+      onError: () => toast({ title: "Sync failed. Check WhatsApp connection.", variant: "destructive" }),
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Groups</h1>
+          <p className="text-muted-foreground mt-1">Manage your WhatsApp groups.</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleSync} disabled={syncGroups.isPending}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${syncGroups.isPending ? "animate-spin" : ""}`} />
+            Sync from WhatsApp
+          </Button>
+          <Button onClick={openAdd}>
+            <Plus className="w-4 h-4 mr-2" />
+            New Group
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {isLoading ? (
+          [1, 2, 3].map((i) => <Skeleton key={i} className="h-40" />)
+        ) : (groups ?? []).length === 0 ? (
+          <div className="col-span-3 py-16 text-center text-muted-foreground">
+            <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p>No groups yet. Create one or sync from WhatsApp.</p>
+          </div>
+        ) : (
+          (groups ?? []).map((g) => (
+            <Card key={g.id} className="flex flex-col">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base">{g.name}</CardTitle>
+                      {g.memberCount != null && (
+                        <p className="text-xs text-muted-foreground">{g.memberCount} members</p>
+                      )}
+                    </div>
+                  </div>
+                  {g.groupId && !g.groupId.startsWith("local-") && (
+                    <Badge variant="secondary" className="text-xs">Synced</Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="flex-1 flex flex-col gap-3">
+                <div className="flex gap-2 mt-auto pt-2 border-t border-border">
+                  <Button size="sm" variant="outline" className="flex-1" onClick={() => openAddContact(g)}>
+                    <UserPlus className="w-3 h-3 mr-1" />
+                    Add Member
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(g)}>
+                    <Pencil className="w-3 h-3" />
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => openDelete(g)}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Add Dialog */}
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>New Group</DialogTitle></DialogHeader>
+          <GroupForm form={form} onChange={setForm} />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button onClick={handleAdd} disabled={createGroup.isPending}>
+              {createGroup.isPending ? "Creating..." : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={showEdit} onOpenChange={setShowEdit}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Group</DialogTitle></DialogHeader>
+          <GroupForm form={form} onChange={setForm} />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEdit(false)}>Cancel</Button>
+            <Button onClick={handleEdit} disabled={updateGroup.isPending}>
+              {updateGroup.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Dialog */}
+      <AlertDialog open={showDelete} onOpenChange={setShowDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Group</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{selected?.name}</strong>?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add Contact to Group */}
+      <Dialog open={showAddContact} onOpenChange={setShowAddContact}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add Contact to {selected?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <Label>Select Contact</Label>
+            <Select value={selectedContactId} onValueChange={setSelectedContactId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a contact..." />
+              </SelectTrigger>
+              <SelectContent>
+                {(contacts ?? []).map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.name} — {c.phone}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddContact(false)}>Cancel</Button>
+            <Button onClick={handleAddContact} disabled={addContact.isPending || !selectedContactId}>
+              {addContact.isPending ? "Adding..." : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function GroupForm({
+  form,
+  onChange,
+}: {
+  form: { name: string; description: string; whatsappGroupId: string };
+  onChange: (f: { name: string; description: string; whatsappGroupId: string }) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <Label>Name *</Label>
+        <Input value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} placeholder="Group name" />
+      </div>
+      <div className="space-y-1">
+        <Label>Description</Label>
+        <Input value={form.description} onChange={(e) => onChange({ ...form, description: e.target.value })} placeholder="Optional description" />
+      </div>
+      <div className="space-y-1">
+        <Label>WhatsApp Group ID</Label>
+        <Input value={form.whatsappGroupId} onChange={(e) => onChange({ ...form, whatsappGroupId: e.target.value })} placeholder="120363000000000000@g.us" />
+      </div>
+    </div>
+  );
+}

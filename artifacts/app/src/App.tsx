@@ -2,26 +2,35 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppLayout } from "@/components/layout/app-layout";
+import Dashboard from "@/pages/dashboard";
+import Connect from "@/pages/connect";
+import Contacts from "@/pages/contacts";
+import Groups from "@/pages/groups";
+import Campaigns from "@/pages/campaigns";
+import Compose from "@/pages/compose";
+import Logs from "@/pages/logs";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
 
-function Home() {
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900">Replit Agent is building...</h1>
-        <p className="mt-2 text-sm text-gray-600">Your app will appear here once it's ready.</p>
-      </div>
-    </div>
-  );
-}
-
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Home} />
-      <Route component={NotFound} />
+      <Route path="/connect" component={Connect} />
+      <Route>
+        <AppLayout>
+          <Switch>
+            <Route path="/" component={Dashboard} />
+            <Route path="/contacts" component={Contacts} />
+            <Route path="/groups" component={Groups} />
+            <Route path="/campaigns" component={Campaigns} />
+            <Route path="/compose" component={Compose} />
+            <Route path="/logs" component={Logs} />
+            <Route component={NotFound} />
+          </Switch>
+        </AppLayout>
+      </Route>
     </Switch>
   );
 }

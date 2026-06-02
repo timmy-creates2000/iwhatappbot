@@ -1,0 +1,159 @@
+import { logger } from "./logger";
+
+interface WhatsAppStatusData {
+  connected: boolean;
+  status: string;
+  phoneNumber: string | null;
+  displayName: string | null;
+}
+
+interface GroupInfo {
+  id: string;
+  subject: string;
+  participants: Array<{ id: string }>;
+}
+
+class WhatsAppService {
+  private sock: unknown = null;
+  private qr: string | null = null;
+  private status: WhatsAppStatusData = {
+    connected: false,
+    status: "disconnected",
+    phoneNumber: null,
+    displayName: null,
+  };
+  private initialized = false;
+
+  getStatus(): WhatsAppStatusData {
+    return this.status;
+  }
+
+  getQR(): string | null {
+    return this.qr;
+  }
+
+  async initialize() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    try {
+      const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } =
+        await import("@whiskeysockets/baileys");
+      const { Boom } = await import("@hapi/boom");
+
+      const { state, saveCreds } = await useMultiFileAuthState(".wa-auth");
+
+      const connect = async () => {
+        const sock = makeWASocket({
+          auth: state,
+          printQRInTerminal: false,
+          logger: logger.child({ module: "baileys" }) as unknown as Parameters<typeof makeWASocket>[0]["logger"],
+        });
+
+        this.sock = sock;
+
+        sock.ev.on("creds.update", saveCreds);
+
+        sock.ev.on("connection.update", async (update: { connection?: string; lastDisconnect?: { error?: unknown }; qr?: string }) => {
+          const { connection, lastDisconnect, qr } = update;
+
+          if (qr) {
+            try {
+              const QRCode = await import("qrcode");
+              this.qr = await QRCode.default.toDataURL(qr);
+              this.status = { ...this.status, status: "qr_ready" };
+              logger.info("QR code generated");
+            } catch {
+              this.qr = null;
+            }
+          }
+
+          if (connection === "close") {
+            const shouldReconnect =
+              (lastDisconnect?.error as InstanceType<typeof Boom>)?.output?.statusCode !==
+              DisconnectReason.loggedOut;
+
+            this.status = {
+              connected: false,
+              status: "disconnected",
+              phoneNumber: null,
+              displayName: null,
+            };
+
+            logger.info({ shouldReconnect }, "Connection closed");
+
+            if (shouldReconnect) {
+              setTimeout(connect, 5000);
+            }
+          }
+
+          if (connection === "open") {
+            this.qr = null;
+            const user = sock.user;
+            this.status = {
+              connected: true,
+              status: "connected",
+              phoneNumber: user?.id?.split(":")[0] ?? null,
+              displayName: user?.name ?? null,
+            };
+            logger.info({ phoneNumber: this.status.phoneNumber }, "WhatsApp connected");
+          }
+        });
+      };
+
+      await connect();
+    } catch (err) {
+      logger.warn({ err }, "Baileys not available or failed to initialize — WhatsApp features disabled");
+      this.status = { connected: false, status: "unavailable", phoneNumber: null, displayName: null };
+    }
+  }
+
+  async logout() {
+    try {
+      if (this.sock) {
+        const sock = this.sock as { logout: () => Promise<void> };
+        await sock.logout();
+      }
+    } catch (err) {
+      logger.warn({ err }, "Logout error");
+    }
+    this.sock = null;
+    this.qr = null;
+    this.status = {
+      connected: false,
+      status: "disconnected",
+      phoneNumber: null,
+      displayName: null,
+    };
+  }
+
+  async fetchGroups(): Promise<GroupInfo[] | null> {
+    if (!this.sock || !this.status.connected) return null;
+    try {
+      const sock = this.sock as { groupFetchAllParticipating: () => Promise<Record<string, GroupInfo>> };
+      const groups = await sock.groupFetchAllParticipating();
+      return Object.values(groups);
+    } catch (err) {
+      logger.error({ err }, "Failed to fetch groups");
+      return null;
+    }
+  }
+
+  async addToGroup(groupId: string, participantJid: string): Promise<void> {
+    if (!this.sock || !this.status.connected) {
+      throw new Error("Not connected to WhatsApp");
+    }
+    const sock = this.sock as { groupParticipantsUpdate: (id: string, participants: string[], action: string) => Promise<unknown> };
+    await sock.groupParticipantsUpdate(groupId, [participantJid], "add");
+  }
+
+  async sendMessage(jid: string, message: string): Promise<void> {
+    if (!this.sock || !this.status.connected) {
+      throw new Error("Not connected to WhatsApp");
+    }
+    const sock = this.sock as { sendMessage: (jid: string, content: { text: string }) => Promise<unknown> };
+    await sock.sendMessage(jid, { text: message });
+  }
+}
+
+export const whatsappService = new WhatsAppService();
