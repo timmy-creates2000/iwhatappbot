@@ -9,6 +9,7 @@ export const campaignsTable = sqliteTable("campaigns", {
   // draft | running | paused | completed | failed | cancelled
   status: text("status").notNull().default("draft"),
   startDate: text("start_date"),
+  delayBetweenMessages: integer("delay_between_messages").default(1000), // in milliseconds
   createdAt: text("created_at").notNull().default(new Date().toISOString()),
 });
 

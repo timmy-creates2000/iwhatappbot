@@ -31,11 +31,9 @@ services:
     region: oregon
     plan: free
     rootDir: artifacts/app
-    buildCommand: pnpm install && pnpm run build
+    buildCommand: pnpm install && pnpm run build --filter @workspace/app
     staticPublishPath: dist/public
     envVars:
-      - key: PORT
-        value: 8081
       - key: BASE_PATH
         value: /
     headers:

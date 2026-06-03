@@ -277,7 +277,8 @@ export const ListCampaignsResponse = zod.array(ListCampaignsResponseItem)
 export const CreateCampaignBody = zod.object({
   "name": zod.string().min(1),
   "messageTemplate": zod.string().min(1),
-  "contactIds": zod.array(zod.number())
+  "contactIds": zod.array(zod.number()),
+  "delayBetweenMessages": zod.number().min(0).optional().default(1000) // milliseconds between messages
 })
 
 
