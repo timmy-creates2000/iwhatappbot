@@ -30,3 +30,13 @@ externalPort = 8081
 [[ports]]
 localPort = 23863
 externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+PORT = "8080"
+APP_PASSWORD = "1232"
+BASE_PATH = "/"
+LOG_LEVEL = "info"
+NODE_ENV = "development"
+ALLOWED_ORIGIN = ""
