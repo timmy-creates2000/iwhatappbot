@@ -99,11 +99,15 @@ router.post("/campaigns", async (req, res): Promise<void> => {
     return;
   }
 
-  const { contactIds, ...campaignData } = parsed.data;
+  const { contactIds, delayBetweenMessages, ...campaignData } = parsed.data;
 
   const [campaign] = await db
     .insert(campaignsTable)
-    .values({ ...campaignData, status: "draft" })
+    .values({ 
+      ...campaignData, 
+      status: "draft",
+      delayBetweenMessages: delayBetweenMessages ?? 1000 
+    })
     .returning();
 
   if (contactIds?.length) {
@@ -325,6 +329,19 @@ router.get("/campaigns/:id/logs", async (req, res): Promise<void> => {
 
 async function processCampaignMessages(campaignId: number, template: string) {
   try {
+    // Get campaign with delay configuration
+    const [campaign] = await db
+      .select()
+      .from(campaignsTable)
+      .where(eq(campaignsTable.id, campaignId));
+
+    if (!campaign) {
+      logger.error({ campaignId }, "Campaign not found");
+      return;
+    }
+
+    const delayBetweenMessages = campaign.delayBetweenMessages ?? 1000;
+
     const pendingLogs = await db
       .select()
       .from(messageLogsTable)
@@ -355,13 +372,13 @@ async function processCampaignMessages(campaignId: number, template: string) {
 
     for (const contact of contacts) {
       // Re-check status on every iteration — supports pause and cancel
-      const [campaign] = await db
+      const [campaignCheck] = await db
         .select({ status: campaignsTable.status })
         .from(campaignsTable)
         .where(eq(campaignsTable.id, campaignId));
 
-      if (!campaign || (campaign.status !== "running")) {
-        logger.info({ campaignId, status: campaign?.status }, "Campaign stopped");
+      if (!campaignCheck || (campaignCheck.status !== "running")) {
+        logger.info({ campaignId, status: campaignCheck?.status }, "Campaign stopped");
         runningCampaigns.delete(campaignId);
         return;
       }
@@ -391,8 +408,11 @@ async function processCampaignMessages(campaignId: number, template: string) {
         }
       }
 
-      // 1 second delay between messages to avoid spam detection
-      await new Promise<void>((r) => setTimeout(r, 1000));
+      // Configurable delay between messages to avoid spam detection
+      // Add random jitter (±20%) to make traffic look more organic
+      const jitter = delayBetweenMessages * 0.2 * (Math.random() - 0.5);
+      const actualDelay = Math.max(100, delayBetweenMessages + jitter);
+      await new Promise<void>((r) => setTimeout(r, actualDelay));
     }
 
     await db
