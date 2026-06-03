@@ -1,0 +1,2 @@
+- [libsql native binary fix](libsql-native-fix.md) — esbuild bundle can't resolve libsql native binary; requires symlinks in api-server node_modules.
+- [PORT env var conflict](port-env-conflict.md) — don't set PORT as a shared env var; each service sets its own via workflow command or artifact.toml.
