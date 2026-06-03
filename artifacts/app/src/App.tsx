@@ -1,4 +1,5 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { useEffect, useState } from "react";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -11,25 +12,48 @@ import Campaigns from "@/pages/campaigns";
 import Compose from "@/pages/compose";
 import Logs from "@/pages/logs";
 import NotFound from "@/pages/not-found";
+import { setDefaultHeaders } from "@workspace/api-client-react";
+import { getStoredPassword } from "@/lib/app-password";
 
 const queryClient = new QueryClient();
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const [, setLocation] = useLocation();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const pwd = getStoredPassword();
+    if (pwd) {
+      setDefaultHeaders({ "x-app-password": pwd });
+      setReady(true);
+    } else {
+      setLocation("/connect");
+      setReady(true);
+    }
+  }, [setLocation]);
+
+  if (!ready) return null;
+  return <>{children}</>;
+}
 
 function Router() {
   return (
     <Switch>
       <Route path="/connect" component={Connect} />
       <Route>
-        <AppLayout>
-          <Switch>
-            <Route path="/" component={Dashboard} />
-            <Route path="/contacts" component={Contacts} />
-            <Route path="/groups" component={Groups} />
-            <Route path="/campaigns" component={Campaigns} />
-            <Route path="/compose" component={Compose} />
-            <Route path="/logs" component={Logs} />
-            <Route component={NotFound} />
-          </Switch>
-        </AppLayout>
+        <AuthGate>
+          <AppLayout>
+            <Switch>
+              <Route path="/" component={Dashboard} />
+              <Route path="/contacts" component={Contacts} />
+              <Route path="/groups" component={Groups} />
+              <Route path="/campaigns" component={Campaigns} />
+              <Route path="/compose" component={Compose} />
+              <Route path="/logs" component={Logs} />
+              <Route component={NotFound} />
+            </Switch>
+          </AppLayout>
+        </AuthGate>
       </Route>
     </Switch>
   );
