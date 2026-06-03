@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { 
   LayoutDashboard, 
@@ -9,9 +9,9 @@ import {
   Smartphone,
   LogOut
 } from "lucide-react";
-import { useLogoutWhatsApp } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { getStoredPassword, clearPassword } from "@/lib/app-password";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -26,18 +26,38 @@ const NAV_ITEMS = [
 export function AppLayout({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
-  const logout = useLogoutWhatsApp();
+  const [isPending, setIsPending] = useState(false);
 
-  const handleLogout = () => {
-    logout.mutate(undefined, {
-      onSuccess: () => {
-        toast({ title: "Logged out from WhatsApp successfully" });
-        setLocation("/connect");
-      },
-      onError: () => {
-        toast({ title: "Failed to logout", variant: "destructive" });
+  const handleLogout = async () => {
+    const storedPassword = getStoredPassword();
+    setIsPending(true);
+    try {
+      const res = await fetch("/api/whatsapp/logout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(storedPassword ? { "x-app-password": storedPassword } : {}),
+        },
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        if (res.status === 401) {
+          toast({ title: "Password required — go to the Connection page to disconnect", variant: "destructive" });
+        } else {
+          toast({ title: body.error ?? "Failed to disconnect", variant: "destructive" });
+        }
+        return;
       }
-    });
+
+      clearPassword();
+      toast({ title: "Disconnected from WhatsApp" });
+      setLocation("/connect");
+    } catch {
+      toast({ title: "Failed to disconnect", variant: "destructive" });
+    } finally {
+      setIsPending(false);
+    }
   };
 
   return (
@@ -80,11 +100,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <Button 
             variant="ghost" 
             className="w-full justify-start text-sidebar-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent"
-            onClick={handleLogout}
-            disabled={logout.isPending}
+            onClick={() => { void handleLogout(); }}
+            disabled={isPending}
           >
             <LogOut className="w-4 h-4 mr-2" />
-            Sign Out
+            {isPending ? "Disconnecting..." : "Sign Out"}
           </Button>
         </div>
       </aside>

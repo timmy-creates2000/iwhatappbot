@@ -10,8 +10,15 @@ import {
   DeleteGroupParams,
 } from "@workspace/api-zod";
 import { whatsappService } from "../../lib/whatsapp";
+import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
+
+/** Normalize phone to JID: strip leading +, append @s.whatsapp.net */
+function toJid(phone: string): string {
+  const digits = phone.startsWith("+") ? phone.slice(1) : phone;
+  return `${digits}@s.whatsapp.net`;
+}
 
 router.get("/groups", async (req, res): Promise<void> => {
   const groups = await db.select().from(groupsTable).orderBy(groupsTable.createdAt);
@@ -52,10 +59,7 @@ router.put("/groups/:id", async (req, res): Promise<void> => {
 
   const [group] = await db
     .update(groupsTable)
-    .set({
-      name: parsed.data.name,
-      memberCount: parsed.data.memberCount ?? null,
-    })
+    .set({ name: parsed.data.name, memberCount: parsed.data.memberCount ?? null })
     .where(eq(groupsTable.id, params.data.id))
     .returning();
 
@@ -110,43 +114,37 @@ router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
     return;
   }
 
+  if (!whatsappService.getStatus().connected) {
+    res.status(400).json({ error: "WhatsApp is not connected" });
+    return;
+  }
+
+  // Deduplicate incoming contactIds
+  const uniqueIds = [...new Set(parsed.data.contactIds)];
+
   const contacts = await db
     .select()
     .from(contactsTable)
-    .where(inArray(contactsTable.id, parsed.data.contactIds));
+    .where(inArray(contactsTable.id, uniqueIds));
 
   for (const contact of contacts) {
-    const logEntry = await db
+    const [logEntry] = await db
       .insert(groupLogsTable)
-      .values({
-        contactId: contact.id,
-        groupId: group.id,
-        status: "pending",
-      })
+      .values({ contactId: contact.id, groupId: group.id, status: "pending" })
       .returning();
 
-    const logId = logEntry[0]?.id;
-
-    if (whatsappService.getStatus().connected) {
-      try {
-        const phone = contact.phone.startsWith("+")
-          ? contact.phone.slice(1)
-          : contact.phone;
-        await whatsappService.addToGroup(group.groupId, `${phone}@s.whatsapp.net`);
-        if (logId) {
-          await db
-            .update(groupLogsTable)
-            .set({ status: "added" })
-            .where(eq(groupLogsTable.id, logId));
-        }
-      } catch {
-        if (logId) {
-          await db
-            .update(groupLogsTable)
-            .set({ status: "failed" })
-            .where(eq(groupLogsTable.id, logId));
-        }
-      }
+    try {
+      await whatsappService.addToGroup(group.groupId, toJid(contact.phone));
+      await db
+        .update(groupLogsTable)
+        .set({ status: "added" })
+        .where(eq(groupLogsTable.id, logEntry.id));
+    } catch (err) {
+      logger.error({ err, contactId: contact.id, groupId: group.id }, "Failed to add contact to group");
+      await db
+        .update(groupLogsTable)
+        .set({ status: "failed" })
+        .where(eq(groupLogsTable.id, logEntry.id));
     }
   }
 

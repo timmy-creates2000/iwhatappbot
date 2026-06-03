@@ -135,7 +135,7 @@ export default function Logs() {
                   {filteredGroup.map((log) => (
                     <div key={log.id} className="flex items-start gap-4 px-6 py-4 hover:bg-muted/30 transition-colors">
                       <div className="mt-0.5 shrink-0">
-                        {log.status === "success" ? (
+                        {log.status === "added" ? (
                           <CheckCircle2 className="w-5 h-5 text-green-500" />
                         ) : log.status === "failed" ? (
                           <XCircle className="w-5 h-5 text-destructive" />

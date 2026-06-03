@@ -1,5 +1,7 @@
+import "dotenv/config";
 import app from "./app";
 import { logger } from "./lib/logger";
+import { whatsappService } from "./lib/whatsapp";
 
 const rawPort = process.env["PORT"];
 
@@ -15,11 +17,16 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
+app.listen(port, (err?: Error) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
   }
 
   logger.info({ port }, "Server listening");
+
+  // Initialize WhatsApp service after server is ready
+  whatsappService.initialize().catch((e: unknown) => {
+    logger.error({ err: e }, "WhatsApp initialization failed");
+  });
 });

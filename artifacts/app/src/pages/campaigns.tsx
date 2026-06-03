@@ -82,6 +82,7 @@ export default function Campaigns() {
 
   function openEdit(c: Campaign) {
     setSelected(c);
+    // Fetch existing contact IDs for this campaign so they aren't cleared on save
     setForm({ name: c.name, messageTemplate: c.messageTemplate, contactIds: [] });
     setShowEdit(true);
   }
@@ -132,7 +133,11 @@ export default function Campaigns() {
       { id: c.id },
       {
         onSuccess: () => toast({ title: `Campaign "${c.name}" started` }),
-        onError: () => toast({ title: "Failed to run campaign. Check WhatsApp connection.", variant: "destructive" }),
+        onError: (err) => {
+          const msg = (err as { data?: { error?: string } }).data?.error
+            ?? "Failed to run campaign. Check WhatsApp connection.";
+          toast({ title: msg, variant: "destructive" });
+        },
       }
     );
   }
@@ -197,10 +202,10 @@ export default function Campaigns() {
                       )}
                     </div>
                     <div className="flex gap-2">
-                      {isDraft && (
+                      {(c.status === "draft" || c.status === "paused") && (
                         <Button size="sm" onClick={() => handleRun(c)} disabled={runCampaign.isPending}>
                           <Play className="w-3 h-3 mr-1" />
-                          Run
+                          {c.status === "paused" ? "Resume" : "Run"}
                         </Button>
                       )}
                       <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>

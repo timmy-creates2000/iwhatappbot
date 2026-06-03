@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql, and } from "drizzle-orm";
 import {
   db,
   campaignsTable,
@@ -23,6 +23,17 @@ import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
 
+// Track in-progress campaign IDs to prevent double-start
+const runningCampaigns = new Set<number>();
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Normalize phone to JID format: strip leading +, append @s.whatsapp.net */
+function toJid(phone: string): string {
+  const digits = phone.startsWith("+") ? phone.slice(1) : phone;
+  return `${digits}@s.whatsapp.net`;
+}
+
 async function getCampaignWithCounts(id: number) {
   const [campaign] = await db
     .select()
@@ -30,21 +41,24 @@ async function getCampaignWithCounts(id: number) {
     .where(eq(campaignsTable.id, id));
   if (!campaign) return null;
 
-  const logs = await db
-    .select()
+  const [counts] = await db
+    .select({
+      sentCount: sql<number>`sum(case when ${messageLogsTable.status} = 'sent' then 1 else 0 end)`,
+      failedCount: sql<number>`sum(case when ${messageLogsTable.status} = 'failed' then 1 else 0 end)`,
+      totalCount: sql<number>`count(*)`,
+    })
     .from(messageLogsTable)
     .where(eq(messageLogsTable.campaignId, id));
 
-  const sentCount = logs.filter((l) => l.status === "sent").length;
-  const failedCount = logs.filter((l) => l.status === "failed").length;
-
   return {
     ...campaign,
-    sentCount,
-    failedCount,
-    totalCount: logs.length,
+    sentCount: counts?.sentCount ?? 0,
+    failedCount: counts?.failedCount ?? 0,
+    totalCount: counts?.totalCount ?? 0,
   };
 }
+
+// ── Routes ────────────────────────────────────────────────────────────────────
 
 router.get("/campaigns", async (req, res): Promise<void> => {
   const campaigns = await db
@@ -52,20 +66,28 @@ router.get("/campaigns", async (req, res): Promise<void> => {
     .from(campaignsTable)
     .orderBy(campaignsTable.createdAt);
 
-  const result = await Promise.all(
-    campaigns.map(async (c) => {
-      const logs = await db
-        .select()
-        .from(messageLogsTable)
-        .where(eq(messageLogsTable.campaignId, c.id));
-      return {
-        ...c,
-        sentCount: logs.filter((l) => l.status === "sent").length,
-        failedCount: logs.filter((l) => l.status === "failed").length,
-        totalCount: logs.length,
-      };
+  // Single aggregated query instead of N+1
+  const allCounts = await db
+    .select({
+      campaignId: messageLogsTable.campaignId,
+      sentCount: sql<number>`sum(case when ${messageLogsTable.status} = 'sent' then 1 else 0 end)`,
+      failedCount: sql<number>`sum(case when ${messageLogsTable.status} = 'failed' then 1 else 0 end)`,
+      totalCount: sql<number>`count(*)`,
     })
-  );
+    .from(messageLogsTable)
+    .groupBy(messageLogsTable.campaignId);
+
+  const countsById = new Map(allCounts.map((c) => [c.campaignId, c]));
+
+  const result = campaigns.map((c) => {
+    const counts = countsById.get(c.id);
+    return {
+      ...c,
+      sentCount: counts?.sentCount ?? 0,
+      failedCount: counts?.failedCount ?? 0,
+      totalCount: counts?.totalCount ?? 0,
+    };
+  });
 
   res.json(result);
 });
@@ -85,13 +107,15 @@ router.post("/campaigns", async (req, res): Promise<void> => {
     .returning();
 
   if (contactIds?.length) {
+    // Deduplicate contactIds before inserting
+    const uniqueIds = [...new Set(contactIds)];
+
     await db.insert(campaignContactsTable).values(
-      contactIds.map((contactId) => ({ campaignId: campaign.id, contactId }))
+      uniqueIds.map((contactId) => ({ campaignId: campaign.id, contactId }))
     );
 
-    // Create pending message logs
     await db.insert(messageLogsTable).values(
-      contactIds.map((contactId) => ({
+      uniqueIds.map((contactId) => ({
         campaignId: campaign.id,
         contactId,
         status: "pending",
@@ -99,7 +123,12 @@ router.post("/campaigns", async (req, res): Promise<void> => {
     );
   }
 
-  res.status(201).json({ ...campaign, sentCount: 0, failedCount: 0, totalCount: contactIds?.length ?? 0 });
+  res.status(201).json({
+    ...campaign,
+    sentCount: 0,
+    failedCount: 0,
+    totalCount: contactIds?.length ?? 0,
+  });
 });
 
 router.get("/campaigns/:id", async (req, res): Promise<void> => {
@@ -131,9 +160,12 @@ router.patch("/campaigns/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  // Prevent direct status manipulation through PATCH — use dedicated endpoints
+  const { status: _status, ...safeUpdate } = parsed.data;
+
   const [campaign] = await db
     .update(campaignsTable)
-    .set(parsed.data)
+    .set(safeUpdate)
     .where(eq(campaignsTable.id, params.data.id))
     .returning();
 
@@ -150,6 +182,11 @@ router.delete("/campaigns/:id", async (req, res): Promise<void> => {
   const params = DeleteCampaignParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  if (runningCampaigns.has(params.data.id)) {
+    res.status(409).json({ error: "Cannot delete a running campaign. Pause or cancel it first." });
     return;
   }
 
@@ -173,19 +210,42 @@ router.post("/campaigns/:id/start", async (req, res): Promise<void> => {
     return;
   }
 
+  const campaignId = params.data.id;
+
+  // Prevent double-start
+  if (runningCampaigns.has(campaignId)) {
+    res.status(409).json({ error: "Campaign is already running" });
+    return;
+  }
+
+  // Check WhatsApp is connected before starting
+  if (!whatsappService.getStatus().connected) {
+    res.status(400).json({ error: "WhatsApp is not connected. Connect your device first." });
+    return;
+  }
+
   const [campaign] = await db
-    .update(campaignsTable)
-    .set({ status: "running", startDate: new Date() })
-    .where(eq(campaignsTable.id, params.data.id))
-    .returning();
+    .select()
+    .from(campaignsTable)
+    .where(eq(campaignsTable.id, campaignId));
 
   if (!campaign) {
     res.status(404).json({ error: "Campaign not found" });
     return;
   }
 
-  // Process messages asynchronously
-  void processCampaignMessages(campaign.id, campaign.messageTemplate);
+  if (campaign.status !== "draft" && campaign.status !== "paused") {
+    res.status(409).json({ error: `Campaign cannot be started from status "${campaign.status}"` });
+    return;
+  }
+
+  await db
+    .update(campaignsTable)
+    .set({ status: "running", startDate: new Date().toISOString() })
+    .where(eq(campaignsTable.id, campaignId));
+
+  runningCampaigns.add(campaignId);
+  void processCampaignMessages(campaignId, campaign.messageTemplate);
 
   res.json({ success: true, message: "Campaign started" });
 });
@@ -208,7 +268,8 @@ router.post("/campaigns/:id/pause", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json({ success: true, message: "Campaign paused" });
+  // processCampaignMessages polls status and will stop on next iteration
+  res.json({ success: true, message: "Campaign paused — current message will finish then stop" });
 });
 
 router.post("/campaigns/:id/cancel", async (req, res): Promise<void> => {
@@ -218,9 +279,11 @@ router.post("/campaigns/:id/cancel", async (req, res): Promise<void> => {
     return;
   }
 
+  runningCampaigns.delete(params.data.id);
+
   const [campaign] = await db
     .update(campaignsTable)
-    .set({ status: "failed" })
+    .set({ status: "cancelled" })
     .where(eq(campaignsTable.id, params.data.id))
     .returning();
 
@@ -255,26 +318,35 @@ router.get("/campaigns/:id/logs", async (req, res): Promise<void> => {
     .leftJoin(contactsTable, eq(messageLogsTable.contactId, contactsTable.id))
     .where(eq(messageLogsTable.campaignId, params.data.id));
 
-  res.json(
-    logs.map((l) => ({
-      ...l,
-      campaignName: null,
-    }))
-  );
+  res.json(logs.map((l) => ({ ...l, campaignName: null })));
 });
+
+// ── Background message processor ─────────────────────────────────────────────
 
 async function processCampaignMessages(campaignId: number, template: string) {
   try {
     const pendingLogs = await db
       .select()
       .from(messageLogsTable)
-      .where(eq(messageLogsTable.campaignId, campaignId));
+      .where(
+        and(
+          eq(messageLogsTable.campaignId, campaignId),
+          eq(messageLogsTable.status, "pending")
+        )
+      );
 
     const pendingContactIds = pendingLogs
-      .filter((l) => l.status === "pending" && l.contactId != null)
+      .filter((l) => l.contactId != null)
       .map((l) => l.contactId as number);
 
-    if (!pendingContactIds.length) return;
+    if (!pendingContactIds.length) {
+      await db
+        .update(campaignsTable)
+        .set({ status: "completed" })
+        .where(eq(campaignsTable.id, campaignId));
+      runningCampaigns.delete(campaignId);
+      return;
+    }
 
     const contacts = await db
       .select()
@@ -282,13 +354,17 @@ async function processCampaignMessages(campaignId: number, template: string) {
       .where(inArray(contactsTable.id, pendingContactIds));
 
     for (const contact of contacts) {
-      // Check if campaign is still running
+      // Re-check status on every iteration — supports pause and cancel
       const [campaign] = await db
-        .select()
+        .select({ status: campaignsTable.status })
         .from(campaignsTable)
         .where(eq(campaignsTable.id, campaignId));
 
-      if (!campaign || campaign.status !== "running") break;
+      if (!campaign || (campaign.status !== "running")) {
+        logger.info({ campaignId, status: campaign?.status }, "Campaign stopped");
+        runningCampaigns.delete(campaignId);
+        return;
+      }
 
       const personalizedMessage = template
         .replace(/\{\{name\}\}/g, contact.name)
@@ -296,30 +372,17 @@ async function processCampaignMessages(campaignId: number, template: string) {
 
       const logEntry = pendingLogs.find((l) => l.contactId === contact.id);
 
-      if (whatsappService.getStatus().connected) {
-        try {
-          const phone = contact.phone.startsWith("+")
-            ? contact.phone.slice(1)
-            : contact.phone;
-          await whatsappService.sendMessage(`${phone}@s.whatsapp.net`, personalizedMessage);
+      try {
+        await whatsappService.sendMessage(toJid(contact.phone), personalizedMessage);
 
-          if (logEntry) {
-            await db
-              .update(messageLogsTable)
-              .set({ status: "sent", message: personalizedMessage, sentAt: new Date() })
-              .where(eq(messageLogsTable.id, logEntry.id));
-          }
-        } catch (err) {
-          logger.error({ err, contactId: contact.id }, "Failed to send message");
-          if (logEntry) {
-            await db
-              .update(messageLogsTable)
-              .set({ status: "failed", message: personalizedMessage })
-              .where(eq(messageLogsTable.id, logEntry.id));
-          }
+        if (logEntry) {
+          await db
+            .update(messageLogsTable)
+            .set({ status: "sent", message: personalizedMessage, sentAt: new Date().toISOString() })
+            .where(eq(messageLogsTable.id, logEntry.id));
         }
-      } else {
-        // Simulate sending if not connected
+      } catch (err) {
+        logger.error({ err, contactId: contact.id }, "Failed to send message");
         if (logEntry) {
           await db
             .update(messageLogsTable)
@@ -328,11 +391,10 @@ async function processCampaignMessages(campaignId: number, template: string) {
         }
       }
 
-      // Delay between messages to avoid spam
-      await new Promise((r) => setTimeout(r, 1000));
+      // 1 second delay between messages to avoid spam detection
+      await new Promise<void>((r) => setTimeout(r, 1000));
     }
 
-    // Mark campaign as completed
     await db
       .update(campaignsTable)
       .set({ status: "completed" })
@@ -343,6 +405,8 @@ async function processCampaignMessages(campaignId: number, template: string) {
       .update(campaignsTable)
       .set({ status: "failed" })
       .where(eq(campaignsTable.id, campaignId));
+  } finally {
+    runningCampaigns.delete(campaignId);
   }
 }
 

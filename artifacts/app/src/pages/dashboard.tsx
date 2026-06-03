@@ -105,7 +105,7 @@ export default function Dashboard() {
                 {activity.map((item) => (
                   <div key={item.id} className="flex items-start gap-4">
                     <div className="mt-0.5">
-                      {item.status === 'success' ? (
+                      {item.status === 'sent' || item.status === 'added' ? (
                         <CheckCircle2 className="w-5 h-5 text-primary" />
                       ) : item.status === 'failed' ? (
                         <AlertCircle className="w-5 h-5 text-destructive" />

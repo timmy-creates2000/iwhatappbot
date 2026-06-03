@@ -13,6 +13,12 @@ interface GroupInfo {
   participants: Array<{ id: string }>;
 }
 
+/** Normalize phone to JID: strip leading +, append @s.whatsapp.net */
+export function toJid(phone: string): string {
+  const digits = phone.startsWith("+") ? phone.slice(1) : phone;
+  return `${digits}@s.whatsapp.net`;
+}
+
 class WhatsAppService {
   private sock: unknown = null;
   private qr: string | null = null;
@@ -22,7 +28,9 @@ class WhatsAppService {
     phoneNumber: null,
     displayName: null,
   };
-  private initialized = false;
+
+  // Use a promise so concurrent initialize() calls all wait on the same init
+  private initPromise: Promise<void> | null = null;
 
   getStatus(): WhatsAppStatusData {
     return this.status;
@@ -32,29 +40,42 @@ class WhatsAppService {
     return this.qr;
   }
 
-  async initialize() {
-    if (this.initialized) return;
-    this.initialized = true;
+  initialize(): Promise<void> {
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this._connect(0);
+    return this.initPromise;
+  }
 
+  private async _connect(attempt: number): Promise<void> {
     try {
-      const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } =
-        await import("@whiskeysockets/baileys");
+      const {
+        default: makeWASocket,
+        useMultiFileAuthState,
+        DisconnectReason,
+      } = await import("@whiskeysockets/baileys");
       const { Boom } = await import("@hapi/boom");
 
       const { state, saveCreds } = await useMultiFileAuthState(".wa-auth");
 
-      const connect = async () => {
-        const sock = makeWASocket({
-          auth: state,
-          printQRInTerminal: false,
-          logger: logger.child({ module: "baileys" }) as unknown as Parameters<typeof makeWASocket>[0]["logger"],
-        });
+      const sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: false,
+        logger: logger.child({
+          module: "baileys",
+        }) as unknown as Parameters<typeof makeWASocket>[0]["logger"],
+      });
 
-        this.sock = sock;
+      this.sock = sock;
 
-        sock.ev.on("creds.update", saveCreds);
+      sock.ev.on("creds.update", saveCreds);
 
-        sock.ev.on("connection.update", async (update: { connection?: string; lastDisconnect?: { error?: unknown }; qr?: string }) => {
+      sock.ev.on(
+        "connection.update",
+        async (update: {
+          connection?: string;
+          lastDisconnect?: { error?: unknown };
+          qr?: string;
+        }) => {
           const { connection, lastDisconnect, qr } = update;
 
           if (qr) {
@@ -69,10 +90,12 @@ class WhatsAppService {
           }
 
           if (connection === "close") {
-            const shouldReconnect =
-              (lastDisconnect?.error as InstanceType<typeof Boom>)?.output?.statusCode !==
-              DisconnectReason.loggedOut;
+            const boom = lastDisconnect?.error as InstanceType<typeof Boom> | undefined;
+            const statusCode = boom?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
+            this.sock = null;
+            this.qr = null;
             this.status = {
               connected: false,
               status: "disconnected",
@@ -80,10 +103,19 @@ class WhatsAppService {
               displayName: null,
             };
 
-            logger.info({ shouldReconnect }, "Connection closed");
+            logger.info({ shouldReconnect, statusCode }, "Connection closed");
 
             if (shouldReconnect) {
-              setTimeout(connect, 5000);
+              // Exponential backoff: 5s, 10s, 20s, 40s … capped at 5 minutes
+              const nextAttempt = attempt + 1;
+              const delayMs = Math.min(5000 * Math.pow(2, attempt), 300_000);
+              logger.info({ delayMs, nextAttempt }, "Reconnecting after delay");
+              setTimeout(() => {
+                this.initPromise = this._connect(nextAttempt);
+              }, delayMs);
+            } else {
+              // Logged out — allow re-initialization from scratch
+              this.initPromise = null;
             }
           }
 
@@ -98,17 +130,23 @@ class WhatsAppService {
             };
             logger.info({ phoneNumber: this.status.phoneNumber }, "WhatsApp connected");
           }
-        });
-      };
-
-      await connect();
+        },
+      );
     } catch (err) {
-      logger.warn({ err }, "Baileys not available or failed to initialize — WhatsApp features disabled");
-      this.status = { connected: false, status: "unavailable", phoneNumber: null, displayName: null };
+      logger.warn(
+        { err },
+        "Baileys not available or failed to initialize — WhatsApp features disabled",
+      );
+      this.status = {
+        connected: false,
+        status: "unavailable",
+        phoneNumber: null,
+        displayName: null,
+      };
     }
   }
 
-  async logout() {
+  async logout(): Promise<void> {
     try {
       if (this.sock) {
         const sock = this.sock as { logout: () => Promise<void> };
@@ -119,6 +157,7 @@ class WhatsAppService {
     }
     this.sock = null;
     this.qr = null;
+    this.initPromise = null;
     this.status = {
       connected: false,
       status: "disconnected",
@@ -130,7 +169,9 @@ class WhatsAppService {
   async fetchGroups(): Promise<GroupInfo[] | null> {
     if (!this.sock || !this.status.connected) return null;
     try {
-      const sock = this.sock as { groupFetchAllParticipating: () => Promise<Record<string, GroupInfo>> };
+      const sock = this.sock as {
+        groupFetchAllParticipating: () => Promise<Record<string, GroupInfo>>;
+      };
       const groups = await sock.groupFetchAllParticipating();
       return Object.values(groups);
     } catch (err) {
@@ -143,7 +184,13 @@ class WhatsAppService {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");
     }
-    const sock = this.sock as { groupParticipantsUpdate: (id: string, participants: string[], action: string) => Promise<unknown> };
+    const sock = this.sock as {
+      groupParticipantsUpdate: (
+        id: string,
+        participants: string[],
+        action: string,
+      ) => Promise<unknown>;
+    };
     await sock.groupParticipantsUpdate(groupId, [participantJid], "add");
   }
 
@@ -151,7 +198,12 @@ class WhatsAppService {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");
     }
-    const sock = this.sock as { sendMessage: (jid: string, content: { text: string }) => Promise<unknown> };
+    const sock = this.sock as {
+      sendMessage: (
+        jid: string,
+        content: { text: string },
+      ) => Promise<unknown>;
+    };
     await sock.sendMessage(jid, { text: message });
   }
 }

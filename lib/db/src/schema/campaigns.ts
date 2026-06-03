@@ -1,14 +1,15 @@
-import { pgTable, text, serial, timestamp } from "drizzle-orm/pg-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-export const campaignsTable = pgTable("campaigns", {
-  id: serial("id").primaryKey(),
+export const campaignsTable = sqliteTable("campaigns", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   messageTemplate: text("message_template").notNull(),
-  status: text("status").notNull().default("draft"), // draft | running | paused | completed | failed
-  startDate: timestamp("start_date", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // draft | running | paused | completed | failed | cancelled
+  status: text("status").notNull().default("draft"),
+  startDate: text("start_date"),
+  createdAt: text("created_at").notNull().default(new Date().toISOString()),
 });
 
 export const insertCampaignSchema = createInsertSchema(campaignsTable).omit({ id: true, createdAt: true });

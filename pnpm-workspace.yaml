@@ -73,6 +73,9 @@ onlyBuiltDependencies:
   - esbuild
   - msw
   - unrs-resolver
+  - '@google/genai'
+  - '@whiskeysockets/baileys'
+  - protobufjs
 
 overrides:
   # replit uses linux-x64 only, we can exclude all other platforms
@@ -94,8 +97,9 @@ overrides:
   "esbuild>@esbuild/openbsd-x64": "-"
   "esbuild>@esbuild/sunos-x64": "-"
   "esbuild>@esbuild/win32-arm64": "-"
+  # win32-x64 is needed on Windows — do NOT exclude it
+  # "esbuild>@esbuild/win32-x64": "-"
   "esbuild>@esbuild/win32-ia32": "-"
-  "esbuild>@esbuild/win32-x64": "-"
   "esbuild>@esbuild/aix-ppc64": '-'
   "esbuild>@esbuild/android-arm": '-'
   "esbuild>@esbuild/android-arm64": '-'
@@ -158,3 +162,9 @@ overrides:
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
+
+allowBuilds:
+  '@google/genai': false
+  '@whiskeysockets/baileys': false
+  esbuild: false
+  protobufjs: false

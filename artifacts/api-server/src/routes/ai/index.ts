@@ -10,6 +10,8 @@ import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
 
+const MAX_TOPIC_LENGTH = 1000;
+
 router.post("/ai/compose", async (req, res): Promise<void> => {
   const parsed = ComposeMessageBody.safeParse(req.body);
   if (!parsed.success) {
@@ -19,11 +21,18 @@ router.post("/ai/compose", async (req, res): Promise<void> => {
 
   const { topic, tone, purpose } = parsed.data;
 
+  // Guard against huge prompts burning API quota
+  if (topic.length > MAX_TOPIC_LENGTH) {
+    res.status(400).json({ error: `Topic must be ${MAX_TOPIC_LENGTH} characters or fewer` });
+    return;
+  }
+
   try {
     const { GoogleGenAI } = await import("@google/genai");
-    const apiKey = process.env.GEMINI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+    const apiKey = process.env["GEMINI_API_KEY"] ?? process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
 
     if (!apiKey) {
+      // Graceful fallback — return the raw topic as the message
       res.json({ message: topic });
       return;
     }

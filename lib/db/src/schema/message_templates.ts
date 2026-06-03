@@ -1,14 +1,14 @@
-import { pgTable, text, serial, timestamp } from "drizzle-orm/pg-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-export const messageTemplatesTable = pgTable("message_templates", {
-  id: serial("id").primaryKey(),
+export const messageTemplatesTable = sqliteTable("message_templates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   content: text("content").notNull(),
   tone: text("tone"),
   purpose: text("purpose"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: text("created_at").notNull().default(new Date().toISOString()),
 });
 
 export const insertMessageTemplateSchema = createInsertSchema(messageTemplatesTable).omit({ id: true, createdAt: true });

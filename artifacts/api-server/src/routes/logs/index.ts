@@ -16,7 +16,8 @@ router.get("/logs/messages", async (req, res): Promise<void> => {
   const parsed = ListMessageLogsQueryParams.safeParse(req.query);
   const status = parsed.success ? parsed.data.status : undefined;
 
-  const rows = await db
+  // Filter in SQL rather than fetching the whole table into JS
+  const query = db
     .select({
       id: messageLogsTable.id,
       contactId: messageLogsTable.contactId,
@@ -32,17 +33,21 @@ router.get("/logs/messages", async (req, res): Promise<void> => {
     .from(messageLogsTable)
     .leftJoin(contactsTable, eq(messageLogsTable.contactId, contactsTable.id))
     .leftJoin(campaignsTable, eq(messageLogsTable.campaignId, campaignsTable.id))
-    .orderBy(messageLogsTable.createdAt);
+    .orderBy(messageLogsTable.createdAt)
+    .$dynamic();
 
-  const result = status ? rows.filter((r) => r.status === status) : rows;
-  res.json(result);
+  const rows = status
+    ? await query.where(eq(messageLogsTable.status, status))
+    : await query;
+
+  res.json(rows);
 });
 
 router.get("/logs/groups", async (req, res): Promise<void> => {
   const parsed = ListGroupLogsQueryParams.safeParse(req.query);
   const status = parsed.success ? parsed.data.status : undefined;
 
-  const rows = await db
+  const query = db
     .select({
       id: groupLogsTable.id,
       contactId: groupLogsTable.contactId,
@@ -56,10 +61,14 @@ router.get("/logs/groups", async (req, res): Promise<void> => {
     .from(groupLogsTable)
     .leftJoin(contactsTable, eq(groupLogsTable.contactId, contactsTable.id))
     .leftJoin(groupsTable, eq(groupLogsTable.groupId, groupsTable.id))
-    .orderBy(groupLogsTable.createdAt);
+    .orderBy(groupLogsTable.createdAt)
+    .$dynamic();
 
-  const result = status ? rows.filter((r) => r.status === status) : rows;
-  res.json(result);
+  const rows = status
+    ? await query.where(eq(groupLogsTable.status, status))
+    : await query;
+
+  res.json(rows);
 });
 
 export default router;

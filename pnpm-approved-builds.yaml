@@ -1,0 +1,5 @@
+approved:
+  - '@google/genai'
+  - '@whiskeysockets/baileys'
+  - esbuild
+  - protobufjs

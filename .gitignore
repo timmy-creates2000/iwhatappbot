@@ -37,6 +37,14 @@ yarn-error.log
 testem.log
 /typings
 
+# Environment secrets — never commit these
+.env
+.env.local
+.env.*.local
+
+# WhatsApp session auth files
+.wa-auth/
+
 # System Files
 .DS_Store
 Thumbs.db

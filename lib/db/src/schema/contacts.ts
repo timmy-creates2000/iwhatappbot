@@ -1,14 +1,14 @@
-import { pgTable, text, serial, timestamp, json } from "drizzle-orm/pg-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
-export const contactsTable = pgTable("contacts", {
-  id: serial("id").primaryKey(),
+export const contactsTable = sqliteTable("contacts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   phone: text("phone").notNull().unique(),
-  tags: json("tags").$type<string[]>().default([]),
+  tags: text("tags", { mode: "json" }).$type<string[]>().default([]),
   notes: text("notes"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: text("created_at").notNull().default(new Date().toISOString()),
 });
 
 export const insertContactSchema = createInsertSchema(contactsTable).omit({ id: true, createdAt: true });
