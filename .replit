@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-20", "web", "bash"]
 
 [deployment]
 router = "application"
@@ -50,3 +50,6 @@ BASE_PATH = "/"
 LOG_LEVEL = "info"
 NODE_ENV = "development"
 ALLOWED_ORIGIN = ""
+
+[nix]
+channel = "stable-25_05"
