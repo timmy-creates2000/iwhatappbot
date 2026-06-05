@@ -2,8 +2,13 @@
   "name": "workspace",
   "version": "0.0.0",
   "license": "MIT",
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=9"
+  },
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail --names \"api,app\" --prefix-colors \"green,cyan\" \"pnpm --filter @workspace/api-server run dev\" \"cross-env PORT=3000 BASE_PATH=/ pnpm --filter @workspace/app run dev\"",
+    "dev": "node dev.mjs",
     "dev:api": "pnpm --filter @workspace/api-server run dev",
     "dev:app": "cross-env PORT=3000 BASE_PATH=/ pnpm --filter @workspace/app run dev",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
@@ -12,8 +17,6 @@
   },
   "private": true,
   "devDependencies": {
-    "concurrently": "^9.1.2",
-    "cross-env": "^10.1.0",
     "prettier": "^3.8.3",
     "typescript": "~5.9.3"
   }
