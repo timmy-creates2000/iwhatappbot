@@ -23,6 +23,9 @@ build/
 *.a
 *.out
 
+# TypeScript incremental build info
+*.tsbuildinfo
+
 # Editor/IDE
 .vscode/
 .idea/
@@ -46,3 +49,18 @@ Thumbs.db
 .env
 .env.local
 *.env.*
+
+# WhatsApp session auth (contains private keys — never commit)
+.wa-auth/
+
+# Auto-generated deployment/bug-fix docs (local reference only)
+BUG_FIXES.md
+BUG_FIXES_QUICK_REFERENCE.md
+DEPLOYMENT_CHECKLIST.md
+DEPLOYMENT_README.md
+QUICK_DEPLOY.md
+RENDER_CONFIG_GUIDE.md
+RENDER_DEPLOYMENT.md
+
+# Lock file duplicates
+package-lock.json

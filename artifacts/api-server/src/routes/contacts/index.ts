@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, ilike, inArray } from "drizzle-orm";
+import { eq, like, inArray } from "drizzle-orm";
 import { db, contactsTable } from "@workspace/db";
 import {
   ListContactsQueryParams,
@@ -22,7 +22,7 @@ router.get("/contacts", async (req, res): Promise<void> => {
     ? await db
         .select()
         .from(contactsTable)
-        .where(ilike(contactsTable.name, `%${search}%`))
+        .where(like(contactsTable.name, `%${search}%`))
         .orderBy(contactsTable.createdAt)
     : await db.select().from(contactsTable).orderBy(contactsTable.createdAt);
 

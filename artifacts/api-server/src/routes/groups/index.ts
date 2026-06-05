@@ -78,17 +78,50 @@ router.delete("/groups/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [group] = await db
-    .delete(groupsTable)
-    .where(eq(groupsTable.id, params.data.id))
-    .returning();
+  try {
+    // Get the group from DB to find groupId
+    const groups = await db
+      .select()
+      .from(groupsTable)
+      .where(eq(groupsTable.id, params.data.id));
 
-  if (!group) {
-    res.status(404).json({ error: "Group not found" });
-    return;
+    if (!groups || groups.length === 0) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+
+    const group = groups[0];
+
+    // If group was synced from WhatsApp (has a proper groupId), try to leave it
+    if (group.groupId && !group.groupId.startsWith("local-")) {
+      try {
+        const waStatus = whatsappService.getStatus();
+        if (waStatus.connected) {
+          await whatsappService.deleteGroup(group.groupId);
+          logger.info({ groupId: group.groupId }, "Successfully left WhatsApp group");
+        }
+      } catch (err) {
+        logger.warn({ err, groupId: group.groupId }, "Failed to delete group from WhatsApp, removing from DB only");
+        // Continue with DB deletion even if WhatsApp delete fails
+      }
+    }
+
+    // Delete from database
+    const [deletedGroup] = await db
+      .delete(groupsTable)
+      .where(eq(groupsTable.id, params.data.id))
+      .returning();
+
+    if (!deletedGroup) {
+      res.status(404).json({ error: "Group not found" });
+      return;
+    }
+
+    res.json({ success: true, message: "Group deleted successfully", group: deletedGroup });
+  } catch (err) {
+    logger.error({ err, groupId: params.data.id }, "Error deleting group");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to delete group" });
   }
-
-  res.json({ success: true, message: "Group deleted" });
 });
 
 router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {

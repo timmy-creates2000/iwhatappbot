@@ -26,6 +26,21 @@ const router: IRouter = Router();
 // Track in-progress campaign IDs to prevent double-start
 const runningCampaigns = new Set<number>();
 
+// ── Startup cleanup ───────────────────────────────────────────────────────────
+// If the server crashed or restarted while campaigns were running, those
+// campaigns are stuck in "running" status in the DB but have no active
+// processor. Reset them to "paused" on startup so they can be restarted.
+(async () => {
+  try {
+    await db
+      .update(campaignsTable)
+      .set({ status: "paused" })
+      .where(eq(campaignsTable.status, "running"));
+  } catch (err) {
+    logger.warn({ err }, "Failed to reset stale running campaigns on startup");
+  }
+})();
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Normalize phone to JID format: strip leading +, append @s.whatsapp.net */

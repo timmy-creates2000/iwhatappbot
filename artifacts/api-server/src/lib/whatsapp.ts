@@ -194,6 +194,43 @@ class WhatsAppService {
     await sock.groupParticipantsUpdate(groupId, [participantJid], "add");
   }
 
+  async removeFromGroup(groupId: string, participantJid: string): Promise<void> {
+    if (!this.sock || !this.status.connected) {
+      throw new Error("Not connected to WhatsApp");
+    }
+    const sock = this.sock as {
+      groupParticipantsUpdate: (
+        id: string,
+        participants: string[],
+        action: string,
+      ) => Promise<unknown>;
+    };
+    await sock.groupParticipantsUpdate(groupId, [participantJid], "remove");
+  }
+
+  async deleteGroup(groupId: string): Promise<void> {
+    if (!this.sock || !this.status.connected) {
+      throw new Error("Not connected to WhatsApp");
+    }
+    const sock = this.sock as {
+      groupLeave: (groupId: string) => Promise<unknown>;
+    };
+    // Note: WhatsApp API can only leave groups, not delete them permanently
+    // This removes the bot from the group
+    await sock.groupLeave(groupId);
+    logger.info({ groupId }, "Left WhatsApp group");
+  }
+
+  async refreshQR(): Promise<void> {
+    if (this.status.connected) {
+      throw new Error("Already connected. Disconnect first to generate a new QR code.");
+    }
+    // Force a new connection attempt which will generate a fresh QR
+    await this.logout();
+    this.initPromise = null;
+    await this.initialize();
+  }
+
   async sendMessage(jid: string, message: string): Promise<void> {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");

@@ -1,46 +1,39 @@
 services:
-  # ── API Server ──────────────────────────────────────────────────────────────
   - type: web
-    name: commgrowth-api
+    name: iwhatsappbot-api
     runtime: node
-    region: oregon
-    plan: free
-    rootDir: .
-    buildCommand: pnpm install && pnpm run build --filter @workspace/api-server
+    region: oregon          # change to: frankfurt | singapore | ohio as needed
+    plan: starter           # free tier — upgrade to "standard" for persistent disk
+
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+
+    healthCheckPath: /api/healthz
+
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 8080
+        value: "10000"            # Render injects its own PORT but this is a safe default
       - key: TURSO_DATABASE_URL
-        sync: false   # Set this manually in Render dashboard
+        sync: false               # set manually in Render dashboard
       - key: TURSO_AUTH_TOKEN
-        sync: false   # Set this manually in Render dashboard
+        sync: false               # set manually in Render dashboard
       - key: APP_PASSWORD
-        sync: false   # Set this manually in Render dashboard
-      - key: GEMINI_API_KEY
-        sync: false   # Optional — set if you want AI compose
+        generateValue: true       # Render auto-generates a strong random value
       - key: ALLOWED_ORIGIN
-        sync: false   # Set to your frontend URL after deploying
+        sync: false               # set to your frontend URL e.g. https://yourdomain.com
+      - key: GEMINI_API_KEY
+        sync: false               # optional — set if you use the AI compose feature
+      - key: LOG_LEVEL
+        value: info
 
-  # ── Frontend ────────────────────────────────────────────────────────────────
-  - type: web
-    name: commgrowth-app
-    runtime: static
-    region: oregon
-    plan: free
-    rootDir: artifacts/app
-    buildCommand: pnpm install && pnpm run build --filter @workspace/app
-    staticPublishPath: dist/public
-    envVars:
-      - key: BASE_PATH
-        value: /
-    headers:
-      - path: /*
-        name: Cache-Control
-        value: no-cache
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    # ── Persistent disk ────────────────────────────────────────────────────────
+    # Uncomment the block below (and upgrade to "standard" plan) to keep your
+    # WhatsApp session alive across deploys. Without this, the .wa-auth/ folder
+    # is wiped on every deploy and you must re-scan the QR code each time.
+    #
+    # disk:
+    #   name: wa-auth-data
+    #   mountPath: /opt/render/project/src/artifacts/api-server/.wa-auth
+    #   sizeGB: 1

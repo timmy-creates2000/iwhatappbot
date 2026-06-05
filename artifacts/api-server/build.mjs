@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm, symlink } from "node:fs/promises";
+import { rm, symlink, mkdir, readdir } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -64,7 +64,9 @@ async function buildAll() {
       "@azure/*",
       "@opentelemetry/*",
       "@google-cloud/*",
-      "@google/*",
+      // NOTE: @google/genai is a runtime dependency — do NOT externalize it
+      // via "@google/*" glob. It must be resolvable at runtime.
+      // Only cloud SDK and googleapis (heavy optional) are excluded below.
       "googleapis",
       "firebase-admin",
       "@parcel/watcher",
@@ -124,6 +126,72 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
   const distNodeModules = path.resolve(distDir, "node_modules");
   const workspaceNodeModules = path.resolve(artifactDir, "../../node_modules");
   await symlink(workspaceNodeModules, distNodeModules).catch(() => {});
+
+  // ── libsql native binary fix ──────────────────────────────────────────────
+  // pnpm's virtual store keeps @libsql/linux-x64-gnu under
+  // .pnpm/<pkg>/node_modules/ with no top-level entry, so the bundled dist/
+  // can't find it just from the workspace root symlink above.
+  // We also symlink it directly into artifacts/api-server/node_modules/
+  // so Node can resolve it when running from this artifact directory.
+  await fixLibsqlNativeBinary(artifactDir, workspaceNodeModules);
+}
+
+/**
+ * Finds the @libsql/linux-x64-gnu (or equivalent platform) native package
+ * inside pnpm's virtual store and symlinks it into api-server/node_modules/
+ * so the bundled dist can resolve it at runtime.
+ */
+async function fixLibsqlNativeBinary(artifactDir, workspaceNodeModules) {
+  try {
+    const pnpmStore = path.resolve(workspaceNodeModules, ".pnpm");
+    let storeEntries;
+    try {
+      storeEntries = await readdir(pnpmStore);
+    } catch {
+      // No .pnpm dir — likely a flat node_modules (npm/yarn). Nothing to fix.
+      return;
+    }
+
+    // Find the libsql and @libsql/linux-* entries in the pnpm store
+    const libsqlEntry = storeEntries.find(
+      (e) => e.startsWith("libsql@") || e.startsWith("libsql+")
+    );
+    const libsqlNativeEntry = storeEntries.find((e) =>
+      /^@libsql\+linux-(x64|arm64)-(gnu|musl)@/.test(e)
+    );
+
+    const artifactNodeModules = path.resolve(artifactDir, "node_modules");
+    await mkdir(artifactNodeModules, { recursive: true });
+    const libsqlAtDir = path.resolve(artifactNodeModules, "@libsql");
+    await mkdir(libsqlAtDir, { recursive: true });
+
+    if (libsqlEntry) {
+      const src = path.resolve(pnpmStore, libsqlEntry, "node_modules", "libsql");
+      const dest = path.resolve(artifactNodeModules, "libsql");
+      await symlink(src, dest).catch(() => {}); // ignore if already exists
+    }
+
+    if (libsqlNativeEntry) {
+      // e.g. "@libsql+linux-x64-gnu@0.4.7" → folder name "@libsql/linux-x64-gnu"
+      const folderName = libsqlNativeEntry
+        .replace(/^(@libsql\+)/, "@libsql/")
+        .replace(/@[\d.]+$/, "");
+      const nativePkgName = folderName.replace("@libsql/", ""); // e.g. "linux-x64-gnu"
+      const src = path.resolve(
+        pnpmStore,
+        libsqlNativeEntry,
+        "node_modules",
+        "@libsql",
+        nativePkgName
+      );
+      const dest = path.resolve(libsqlAtDir, nativePkgName);
+      await symlink(src, dest).catch(() => {}); // ignore if already exists
+    }
+  } catch (err) {
+    // Non-fatal — log a warning but don't fail the build.
+    // The dist/node_modules symlink may still resolve it on some setups.
+    console.warn("[build] Warning: could not symlink libsql native binary:", err?.message ?? err);
+  }
 }
 
 buildAll().catch((err) => {

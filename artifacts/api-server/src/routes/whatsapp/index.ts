@@ -4,13 +4,6 @@ import { db, groupsTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
-// Public — UI always needs connection state (auth is handled at router level,
-// this route is exempted in routes/index.ts)
-router.get("/whatsapp/status", async (req, res): Promise<void> => {
-  const status = whatsappService.getStatus();
-  res.json(status);
-});
-
 // Protected — only the owner can see the QR code
 router.get("/whatsapp/qr", async (req, res): Promise<void> => {
   const status = whatsappService.getStatus();
@@ -20,6 +13,28 @@ router.get("/whatsapp/qr", async (req, res): Promise<void> => {
   }
   const qr = whatsappService.getQR();
   res.json({ qr, status: status.status });
+});
+
+// Protected — refresh QR code (useful when QR expires)
+router.post("/whatsapp/qr/refresh", async (req, res): Promise<void> => {
+  try {
+    const status = whatsappService.getStatus();
+    if (status.connected) {
+      res.status(409).json({ error: "Already connected. Call /whatsapp/logout first to generate a new QR code." });
+      return;
+    }
+    
+    await whatsappService.refreshQR();
+    
+    // Give it a moment to generate new QR
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    const newQr = whatsappService.getQR();
+    const newStatus = whatsappService.getStatus();
+    res.json({ qr: newQr, status: newStatus.status, message: "New QR code generated. Please scan it quickly as it expires in 60 seconds." });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to refresh QR code" });
+  }
 });
 
 // Protected — only the owner can disconnect
