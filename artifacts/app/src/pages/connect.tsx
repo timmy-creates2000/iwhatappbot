@@ -64,8 +64,10 @@ export default function ConnectPage() {
 
     setIsVerifying(true);
     try {
-      // Probe the QR endpoint with the supplied password to verify it
-      const res = await fetch("/api/whatsapp/qr", {
+      // Probe the QR endpoint with the supplied password to verify it.
+      // Use VITE_API_URL as the base when set (Render), else relative path (Replit/local).
+      const base = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
+      const res = await fetch(`${base}/api/whatsapp/qr`, {
         headers: { "x-app-password": password },
       });
 

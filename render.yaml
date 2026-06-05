@@ -1,9 +1,10 @@
 services:
+  # ── Backend API (Node.js Web Service) ────────────────────────────────────────
   - type: web
     name: iwhatsappbot-api
     runtime: node
-    region: oregon          # change to: frankfurt | singapore | ohio as needed
-    plan: starter           # free tier — upgrade to "standard" for persistent disk
+    region: oregon
+    plan: starter           # use "free" if you want, but it sleeps — bad for WA sessions
 
     buildCommand: pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
@@ -14,7 +15,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: "10000"            # Render injects its own PORT but this is a safe default
+        value: "10000"
       - key: TURSO_DATABASE_URL
         sync: false               # set manually in Render dashboard
       - key: TURSO_AUTH_TOKEN
@@ -22,18 +23,39 @@ services:
       - key: APP_PASSWORD
         generateValue: true       # Render auto-generates a strong random value
       - key: ALLOWED_ORIGIN
-        sync: false               # set to your frontend URL e.g. https://yourdomain.com
+        sync: false               # set to your frontend URL after first deploy
       - key: GEMINI_API_KEY
-        sync: false               # optional — set if you use the AI compose feature
+        sync: false               # optional
       - key: LOG_LEVEL
         value: info
 
-    # ── Persistent disk ────────────────────────────────────────────────────────
-    # Uncomment the block below (and upgrade to "standard" plan) to keep your
-    # WhatsApp session alive across deploys. Without this, the .wa-auth/ folder
-    # is wiped on every deploy and you must re-scan the QR code each time.
-    #
+    # Uncomment + upgrade to "standard" plan to keep WhatsApp session alive across deploys
     # disk:
     #   name: wa-auth-data
     #   mountPath: /opt/render/project/src/artifacts/api-server/.wa-auth
     #   sizeGB: 1
+
+  # ── Frontend (Static Site) ────────────────────────────────────────────────────
+  - type: web
+    name: iwhatsappbot-app
+    runtime: static
+    region: oregon
+
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @workspace/app run build
+    staticPublishPath: artifacts/app/dist/public
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BASE_PATH
+        value: "/"
+      # Point the frontend at the backend API service URL
+      # Replace with your actual Render backend URL after first deploy
+      - key: VITE_API_URL
+        value: https://iwhatappbot.onrender.com
+
+    # SPA routing — serve index.html for all routes
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
