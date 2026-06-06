@@ -2,8 +2,11 @@ import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
 import * as schema from "./schema";
 
-const url = process.env["TURSO_DATABASE_URL"];
-const authToken = process.env["TURSO_AUTH_TOKEN"];
+const stripKeyPrefix = (val: string | undefined, key: string) =>
+  val?.startsWith(`${key}=`) ? val.slice(key.length + 1) : val;
+
+const url = stripKeyPrefix(process.env["TURSO_DATABASE_URL"], "TURSO_DATABASE_URL");
+const authToken = stripKeyPrefix(process.env["TURSO_AUTH_TOKEN"], "TURSO_AUTH_TOKEN");
 
 if (!url) {
   throw new Error(
