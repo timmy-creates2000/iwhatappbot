@@ -5,7 +5,6 @@ import { db, groupsTable, groupLogsTable } from "@workspace/db";
 const router: IRouter = Router();
 
 // Protected — only the owner can see the QR code
-// Auto-initializes the service if it's stuck in a disconnected state (e.g. after stale auth)
 router.get("/whatsapp/qr", async (req, res): Promise<void> => {
   const status = whatsappService.getStatus();
   if (status.connected) {
@@ -13,8 +12,7 @@ router.get("/whatsapp/qr", async (req, res): Promise<void> => {
     return;
   }
 
-  // If disconnected with no active connection attempt, kick off initialization
-  // so the next poll will have a QR code ready.
+  // Auto-initialize so QR is ready on first poll after logout
   if (status.status === "disconnected") {
     whatsappService.initialize().catch(() => {});
   }

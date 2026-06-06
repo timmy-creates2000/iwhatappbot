@@ -51,6 +51,9 @@ class WhatsAppService {
   // Use a promise so concurrent initialize() calls all wait on the same init
   private initPromise: Promise<void> | null = null;
 
+  // Flag set during intentional logout — prevents auto-reconnect
+  private _intentionalLogout = false;
+
   getStatus(): WhatsAppStatusData {
     return this.status;
   }
@@ -61,11 +64,15 @@ class WhatsAppService {
 
   initialize(): Promise<void> {
     if (this.initPromise) return this.initPromise;
+    this._intentionalLogout = false;
     this.initPromise = this._connect(0);
     return this.initPromise;
   }
 
   private async _connect(attempt: number): Promise<void> {
+    // Don't reconnect if user intentionally logged out
+    if (this._intentionalLogout) return;
+
     try {
       const {
         default: makeWASocket,
@@ -111,7 +118,6 @@ class WhatsAppService {
           if (connection === "close") {
             const boom = lastDisconnect?.error as InstanceType<typeof Boom> | undefined;
             const statusCode = boom?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
             this.sock = null;
             this.qr = null;
@@ -122,7 +128,15 @@ class WhatsAppService {
               displayName: null,
             };
 
-            logger.info({ shouldReconnect, statusCode }, "Connection closed");
+            logger.info({ statusCode, intentionalLogout: this._intentionalLogout }, "Connection closed");
+
+            // Don't reconnect if user intentionally logged out
+            if (this._intentionalLogout) {
+              logger.info("Intentional logout — not reconnecting");
+              return;
+            }
+
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
             if (shouldReconnect) {
               // Exponential backoff: 5s, 10s, 20s, 40s … capped at 5 minutes
@@ -133,18 +147,16 @@ class WhatsAppService {
                 this.initPromise = this._connect(nextAttempt);
               }, delayMs);
             } else {
-              // Logged out — wipe session so next init shows a fresh QR
+              // WhatsApp-side logout — wipe session so next init shows fresh QR
               this.clearAuthFiles();
               this.initPromise = null;
-              // Auto-start fresh connection so QR is ready immediately
-              setTimeout(() => {
-                this.initPromise = this._connect(0);
-              }, 1000);
+              logger.info("Logged out from WhatsApp side — session cleared");
             }
           }
 
           if (connection === "open") {
             this.qr = null;
+            this._intentionalLogout = false;
             const user = sock.user;
             this.status = {
               connected: true,
@@ -180,42 +192,39 @@ class WhatsAppService {
   }
 
   async logout(): Promise<void> {
+    // Set flag FIRST so connection.update handler doesn't auto-reconnect
+    this._intentionalLogout = true;
+    this.initPromise = null;
+
     try {
       if (this.sock) {
         await this.sock.logout();
       }
     } catch (err) {
-      logger.warn({ err }, "Logout error");
+      logger.warn({ err }, "Logout error (socket already closed)");
     }
+
     this.sock = null;
     this.qr = null;
-    this.initPromise = null;
     this.status = {
       connected: false,
       status: "disconnected",
       phoneNumber: null,
       displayName: null,
     };
-    // Wipe saved session so next scan is always a fresh number
+
+    // Wipe session files so old number can't reconnect
     this.clearAuthFiles();
-    // Auto-start so QR is ready immediately after disconnect
-    setTimeout(() => {
-      this.initPromise = this._connect(0);
-    }, 500);
+
+    logger.info("Logged out — session cleared. Call initialize() to connect a new number.");
   }
 
   async fetchGroups(): Promise<GroupInfo[] | null> {
     if (!this.sock || !this.status.connected) return null;
     try {
       const groups = await this.sock.groupFetchAllParticipating();
-
-      // Return ALL groups the connected number is participating in
       const allGroups = Object.values(groups);
-
-      logger.info(
-        { total: allGroups.length },
-        "Fetched all participating groups",
-      );
+      logger.info({ total: allGroups.length }, "Fetched all participating groups");
       return allGroups;
     } catch (err) {
       logger.error({ err }, "Failed to fetch groups");
@@ -250,7 +259,7 @@ class WhatsAppService {
     logger.info({ groupId }, "Left WhatsApp group");
   }
 
-  /** @deprecated Use leaveGroup() — WhatsApp cannot delete groups programmatically */
+  /** @deprecated Use leaveGroup() */
   async deleteGroup(groupId: string): Promise<void> {
     return this.leaveGroup(groupId);
   }
@@ -259,8 +268,7 @@ class WhatsAppService {
     if (this.status.connected) {
       throw new Error("Already connected. Disconnect first to generate a new QR code.");
     }
-    // Force a new connection attempt which will generate a fresh QR
-    await this.logout();
+    this._intentionalLogout = false;
     this.initPromise = null;
     await this.initialize();
   }
