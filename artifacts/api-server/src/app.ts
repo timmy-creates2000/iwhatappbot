@@ -48,12 +48,21 @@ app.use(express.urlencoded({ extended: true, limit: "50kb" }));
 app.use("/api", router);
 
 // ── Frontend static files (production) ───────────────────────────────────────
-// In production on Render the frontend is pre-built and served from the same
-// Express process, so no separate static-site service is needed and CORS/
-// VITE_API_URL chicken-and-egg problems disappear entirely.
+// On Render the start command is:
+//   node artifacts/api-server/dist/index.mjs
+// run from the repo root, so process.cwd() = /opt/render/project/src
+// The frontend build output is at: artifacts/app/dist/public (relative to repo root)
 if (process.env["NODE_ENV"] === "production") {
-  const frontendDist = path.resolve(process.cwd(), "artifacts/app/dist/public");
-  if (existsSync(frontendDist)) {
+  // Try candidates in order — first match wins
+  const candidates = [
+    path.resolve(process.cwd(), "artifacts/app/dist/public"),
+    path.resolve(__dirname, "../../app/dist/public"),
+    path.resolve(__dirname, "../../../artifacts/app/dist/public"),
+  ];
+
+  const frontendDist = candidates.find(existsSync) ?? null;
+
+  if (frontendDist) {
     app.use(express.static(frontendDist));
     // SPA catch-all — serve index.html for any non-API path
     app.get("*", (_req, res) => {
@@ -62,9 +71,16 @@ if (process.env["NODE_ENV"] === "production") {
     logger.info({ frontendDist }, "Serving frontend static files");
   } else {
     logger.warn(
-      { frontendDist },
-      "Frontend dist not found — run the frontend build first",
+      { cwd: process.cwd(), candidates },
+      "Frontend dist not found — frontend build may have failed",
     );
+    // Show helpful JSON instead of raw 404
+    app.get("/", (_req, res) => {
+      res.status(200).json({
+        status: "API is running",
+        note: "Frontend build not found. Check build logs on Render.",
+      });
+    });
   }
 }
 
