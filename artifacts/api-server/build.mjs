@@ -157,7 +157,7 @@ async function fixLibsqlNativeBinary(artifactDir, workspaceNodeModules) {
       (e) => e.startsWith("libsql@") || e.startsWith("libsql+")
     );
     const libsqlNativeEntry = storeEntries.find((e) =>
-      /^@libsql\+linux-(x64|arm64)-(gnu|musl)@/.test(e)
+      /^@libsql\+(linux-(x64|arm64)-(gnu|musl)|win32-x64-msvc|darwin-(x64|arm64))@/.test(e)
     );
 
     const artifactNodeModules = path.resolve(artifactDir, "node_modules");
