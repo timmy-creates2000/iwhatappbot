@@ -1,5 +1,13 @@
 import { logger } from "./logger";
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// Resolve .wa-auth relative to the workspace root, not cwd
+// In dev (tsx): __dirname = src/, workspace root = ../../
+// In prod (dist): __dirname = dist/, workspace root = ../../
+const _dirname = path.dirname(fileURLToPath(import.meta.url));
+const WA_AUTH_DIR = path.resolve(_dirname, "../../.wa-auth");
 
 interface WhatsAppStatusData {
   connected: boolean;
@@ -81,7 +89,7 @@ class WhatsAppService {
       } = await import("@whiskeysockets/baileys");
       const { Boom } = await import("@hapi/boom");
 
-      const { state, saveCreds } = await useMultiFileAuthState(".wa-auth");
+      const { state, saveCreds } = await useMultiFileAuthState(WA_AUTH_DIR);
 
       const sock = makeWASocket({
         auth: state,
@@ -184,8 +192,8 @@ class WhatsAppService {
 
   private clearAuthFiles(): void {
     try {
-      fs.rmSync(".wa-auth", { recursive: true, force: true });
-      logger.info("Cleared .wa-auth session directory");
+      fs.rmSync(WA_AUTH_DIR, { recursive: true, force: true });
+      logger.info({ path: WA_AUTH_DIR }, "Cleared .wa-auth session directory");
     } catch (err) {
       logger.warn({ err }, "Failed to clear .wa-auth directory");
     }
