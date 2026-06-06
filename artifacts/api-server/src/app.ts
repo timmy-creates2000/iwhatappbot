@@ -28,11 +28,10 @@ app.use(
 );
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-// Restrict to the configured origin in production; allow all in dev
 const allowedOrigin = process.env["ALLOWED_ORIGIN"];
 app.use(
   cors({
-    origin: allowedOrigin ?? true, // true = echo the request origin (dev only)
+    origin: allowedOrigin ?? true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "x-app-password"],
     credentials: false,
@@ -40,7 +39,6 @@ app.use(
 );
 
 // ── Body parsing ──────────────────────────────────────────────────────────────
-// 50kb for normal endpoints; bulk import can be larger but capped at 500kb
 app.use(express.json({ limit: "50kb" }));
 app.use(express.urlencoded({ extended: true, limit: "50kb" }));
 
@@ -48,38 +46,43 @@ app.use(express.urlencoded({ extended: true, limit: "50kb" }));
 app.use("/api", router);
 
 // ── Frontend static files (production) ───────────────────────────────────────
-// On Render the start command is:
-//   node artifacts/api-server/dist/index.mjs
-// run from the repo root, so process.cwd() = /opt/render/project/src
-// The frontend build output is at: artifacts/app/dist/public (relative to repo root)
+// Bundle lands at:   <repo>/artifacts/api-server/dist/index.mjs
+//   → __dirname  =   <repo>/artifacts/api-server/dist
+// Frontend build at: <repo>/artifacts/app/dist/public
+//   → relative  =   ../../app/dist/public  (from __dirname)
+// Also try process.cwd() which = repo root on Render
 if (process.env["NODE_ENV"] === "production") {
-  // Try candidates in order — first match wins
-  const candidates = [
-    path.resolve(process.cwd(), "artifacts/app/dist/public"),
-    path.resolve(__dirname, "../../app/dist/public"),
-    path.resolve(__dirname, "../../../artifacts/app/dist/public"),
-  ];
+  const fromDirname = path.resolve(__dirname, "../../app/dist/public");
+  const fromCwd     = path.resolve(process.cwd(), "artifacts/app/dist/public");
 
-  const frontendDist = candidates.find(existsSync) ?? null;
+  const frontendDist = existsSync(fromDirname) ? fromDirname
+    : existsSync(fromCwd) ? fromCwd
+    : null;
+
+  logger.info({
+    __dirname,
+    cwd: process.cwd(),
+    fromDirname,
+    fromCwd,
+    found: frontendDist,
+  }, "Frontend dist lookup");
 
   if (frontendDist) {
     app.use(express.static(frontendDist));
-    // SPA catch-all — serve index.html for any non-API path
     app.get("*", (_req, res) => {
       res.sendFile(path.join(frontendDist, "index.html"));
     });
     logger.info({ frontendDist }, "Serving frontend static files");
   } else {
-    logger.warn(
-      { cwd: process.cwd(), candidates },
-      "Frontend dist not found — frontend build may have failed",
-    );
-    // Show helpful JSON instead of raw 404
-    app.get("/", (_req, res) => {
-      res.status(200).json({
-        status: "API is running",
-        note: "Frontend build not found. Check build logs on Render.",
-      });
+    logger.error({ fromDirname, fromCwd }, "Frontend dist NOT found — frontend build failed");
+    // Helpful fallback instead of raw 404
+    app.get("*", (_req, res) => {
+      res.status(503).send(`
+        <h1>Frontend not built</h1>
+        <p>The React app build failed. Check Render build logs.</p>
+        <p>Expected at: <code>${fromDirname}</code></p>
+        <p>API is running at: <a href="/api/healthz">/api/healthz</a></p>
+      `);
     });
   }
 }
