@@ -29,10 +29,11 @@ export default function ConnectPage() {
   const isConnected = statusData?.connected;
 
   // QR — only fetched after password is verified
+  // Poll every 2 s so we pick up the QR as soon as Baileys generates it
   const { data: qrData, isLoading: isLoadingQR, error: qrError } = useGetWhatsAppQR({
     query: {
       enabled: !!authedPassword && !isConnected,
-      refetchInterval: 15000,
+      refetchInterval: 2000,
       retry: false,
     },
     request: {
@@ -203,10 +204,15 @@ export default function ConnectPage() {
             /* ── QR code (password verified, not yet connected) ── */
             <div className="flex flex-col items-center w-full py-4 space-y-6">
               <div className="bg-white p-4 rounded-lg shadow-sm border border-border w-64 h-64 flex items-center justify-center relative">
-                {isLoadingQR || !qrData?.qr ? (
-                  <Skeleton className="w-full h-full absolute inset-0 rounded-lg" />
-                ) : (
+                {qrData?.qr ? (
                   <img src={qrData.qr} alt="WhatsApp QR Code" className="w-full h-full object-contain" />
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-center px-4">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    <p className="text-xs text-muted-foreground">
+                      {isLoadingQR ? "Loading…" : "Connecting to WhatsApp, QR code will appear shortly…"}
+                    </p>
+                  </div>
                 )}
               </div>
 
