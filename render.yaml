@@ -1,21 +1,12 @@
 services:
-  # ── Single Web Service (API + Frontend) ──────────────────────────────────────
-  # The Express API server also serves the pre-built React frontend in production.
-  # No separate static-site service is needed — no CORS or VITE_API_URL headaches.
   - type: web
     name: iwhatsappbot
     runtime: node
     region: oregon
     plan: starter
 
-    # 1. Install pnpm, install deps, build frontend (static), then build API
-    buildCommand: >
-      npm install -g pnpm@9.15.4 &&
-      pnpm install --no-frozen-lockfile &&
-      pnpm --filter @workspace/app run build &&
-      pnpm --filter @workspace/api-server run build
+    buildCommand: "npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/app run build && pnpm --filter @workspace/api-server run build && ls -la artifacts/app/dist/public || echo 'WARN: frontend dist missing'"
 
-    # 2. Start the API server — it serves the built frontend too
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
 
     healthCheckPath: /api/healthz
@@ -23,43 +14,9 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-
-      # Render assigns its own PORT — leave this as-is
       - key: PORT
         value: "10000"
-
-      # ── REQUIRED: set these manually in the Render dashboard ─────────────────
-      # Get your Turso URL + token from https://app.turso.tech
-      - key: TURSO_DATABASE_URL
-        sync: false
-
-      - key: TURSO_AUTH_TOKEN
-        sync: false
-
-      # App password — protects all API routes and the QR login page
-      # Render auto-generates a strong random value; you can override it
-      - key: APP_PASSWORD
-        generateValue: true
-
-      # ── OPTIONAL ─────────────────────────────────────────────────────────────
-      # Google Gemini API key for AI message composition
-      # Get a free key at: https://aistudio.google.com/app/apikey
-      - key: GEMINI_API_KEY
-        sync: false
-
       - key: LOG_LEVEL
         value: info
-
-    # ── WhatsApp session persistence ──────────────────────────────────────────
-    # The .wa-auth/ directory stores the Baileys session credentials.
-    # Without a persistent disk, this is wiped on every deploy and you must
-    # re-scan the QR code each time.
-    #
-    # ⚠️  IMPORTANT: The starter plan does NOT support persistent disks.
-    # Upgrade to the "standard" plan ($7/mo) and uncomment the block below.
-    # Until then, expect to re-scan QR after every deploy.
-    #
-    # disk:
-    #   name: wa-auth-data
-    #   mountPath: /opt/render/project/src/.wa-auth
-    #   sizeGB: 1
+      # Set TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, APP_PASSWORD, GEMINI_API_KEY
+      # manually in the Render dashboard — do NOT put secrets in this file
