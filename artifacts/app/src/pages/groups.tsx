@@ -96,6 +96,21 @@ export default function Groups() {
     setShowAddContact(true);
   }
 
+  function handleDelete() {
+    if (!selected) return;
+    deleteGroup.mutate(
+      { id: selected.id },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getListGroupsQueryKey() });
+          toast({ title: "Group removed from list" });
+          setShowDelete(false);
+        },
+        onError: () => toast({ title: "Failed to remove group", variant: "destructive" }),
+      }
+    );
+  }
+
   function handleAdd() {
     if (!form.name) {
       toast({ title: "Name is required", variant: "destructive" });
@@ -110,6 +125,7 @@ export default function Groups() {
       },
       {
         onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getListGroupsQueryKey() });
           toast({ title: "Group created" });
           setShowAdd(false);
         },
@@ -130,24 +146,11 @@ export default function Groups() {
       },
       {
         onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getListGroupsQueryKey() });
           toast({ title: "Group updated" });
           setShowEdit(false);
         },
         onError: () => toast({ title: "Failed to update", variant: "destructive" }),
-      }
-    );
-  }
-
-  function handleDelete() {
-    if (!selected) return;
-    deleteGroup.mutate(
-      { id: selected.id },
-      {
-        onSuccess: () => {
-          toast({ title: "Left group and removed from list" });
-          setShowDelete(false);
-        },
-        onError: () => toast({ title: "Failed to remove group", variant: "destructive" }),
       }
     );
   }
