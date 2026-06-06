@@ -14,6 +14,24 @@ interface GroupInfo {
   participants: Array<{ id: string; admin?: string | null }>;
 }
 
+/** Minimal typed interface for the Baileys WASocket we actually use */
+interface WASocketLike {
+  user?: { id?: string; name?: string };
+  ev: {
+    on(event: "creds.update", handler: () => void): void;
+    on(event: "connection.update", handler: (update: {
+      connection?: string;
+      lastDisconnect?: { error?: unknown };
+      qr?: string;
+    }) => void): void;
+  };
+  logout(): Promise<void>;
+  groupFetchAllParticipating(): Promise<Record<string, GroupInfo>>;
+  groupParticipantsUpdate(id: string, participants: string[], action: string): Promise<unknown>;
+  groupLeave(groupId: string): Promise<unknown>;
+  sendMessage(jid: string, content: { text: string }): Promise<unknown>;
+}
+
 /** Normalize phone to JID: strip leading +, append @s.whatsapp.net */
 export function toJid(phone: string): string {
   const digits = phone.startsWith("+") ? phone.slice(1) : phone;
@@ -21,7 +39,7 @@ export function toJid(phone: string): string {
 }
 
 class WhatsAppService {
-  private sock: unknown = null;
+  private sock: WASocketLike | null = null;
   private qr: string | null = null;
   private status: WhatsAppStatusData = {
     connected: false,
@@ -64,7 +82,7 @@ class WhatsAppService {
         logger: logger.child({
           module: "baileys",
         }) as unknown as Parameters<typeof makeWASocket>[0]["logger"],
-      });
+      }) as unknown as WASocketLike;
 
       this.sock = sock;
 
@@ -164,8 +182,7 @@ class WhatsAppService {
   async logout(): Promise<void> {
     try {
       if (this.sock) {
-        const sock = this.sock as { logout: () => Promise<void> };
-        await sock.logout();
+        await this.sock.logout();
       }
     } catch (err) {
       logger.warn({ err }, "Logout error");
@@ -190,10 +207,7 @@ class WhatsAppService {
   async fetchGroups(): Promise<GroupInfo[] | null> {
     if (!this.sock || !this.status.connected) return null;
     try {
-      const sock = this.sock as {
-        groupFetchAllParticipating: () => Promise<Record<string, GroupInfo>>;
-      };
-      const groups = await sock.groupFetchAllParticipating();
+      const groups = await this.sock.groupFetchAllParticipating();
       const myPhone = this.status.phoneNumber;
 
       // Only return groups where the connected number is admin or superadmin
@@ -219,41 +233,32 @@ class WhatsAppService {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");
     }
-    const sock = this.sock as {
-      groupParticipantsUpdate: (
-        id: string,
-        participants: string[],
-        action: string,
-      ) => Promise<unknown>;
-    };
-    await sock.groupParticipantsUpdate(groupId, [participantJid], "add");
+    await this.sock.groupParticipantsUpdate(groupId, [participantJid], "add");
   }
 
   async removeFromGroup(groupId: string, participantJid: string): Promise<void> {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");
     }
-    const sock = this.sock as {
-      groupParticipantsUpdate: (
-        id: string,
-        participants: string[],
-        action: string,
-      ) => Promise<unknown>;
-    };
-    await sock.groupParticipantsUpdate(groupId, [participantJid], "remove");
+    await this.sock.groupParticipantsUpdate(groupId, [participantJid], "remove");
   }
 
-  async deleteGroup(groupId: string): Promise<void> {
+  /**
+   * Leaves a WhatsApp group (removes the bot from the group).
+   * Note: WhatsApp does not allow programmatic group deletion — this only
+   * removes the connected account from the group.
+   */
+  async leaveGroup(groupId: string): Promise<void> {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");
     }
-    const sock = this.sock as {
-      groupLeave: (groupId: string) => Promise<unknown>;
-    };
-    // Note: WhatsApp API can only leave groups, not delete them permanently
-    // This removes the bot from the group
-    await sock.groupLeave(groupId);
+    await this.sock.groupLeave(groupId);
     logger.info({ groupId }, "Left WhatsApp group");
+  }
+
+  /** @deprecated Use leaveGroup() — WhatsApp cannot delete groups programmatically */
+  async deleteGroup(groupId: string): Promise<void> {
+    return this.leaveGroup(groupId);
   }
 
   async refreshQR(): Promise<void> {
@@ -270,13 +275,7 @@ class WhatsAppService {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");
     }
-    const sock = this.sock as {
-      sendMessage: (
-        jid: string,
-        content: { text: string },
-      ) => Promise<unknown>;
-    };
-    await sock.sendMessage(jid, { text: message });
+    await this.sock.sendMessage(jid, { text: message });
   }
 }
 

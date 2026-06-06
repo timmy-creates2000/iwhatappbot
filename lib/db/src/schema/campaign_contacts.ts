@@ -6,7 +6,7 @@ export const campaignContactsTable = sqliteTable("campaign_contacts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   campaignId: integer("campaign_id").notNull(),
   contactId: integer("contact_id").notNull(),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 export const insertCampaignContactSchema = createInsertSchema(campaignContactsTable).omit({ id: true, createdAt: true });

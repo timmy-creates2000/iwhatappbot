@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useListGroups,
   useCreateGroup,
@@ -7,6 +8,7 @@ import {
   useAddContactsToGroup,
   useSyncWhatsAppGroups,
   useListContacts,
+  getListGroupsQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,13 +45,14 @@ import { Users, Plus, RefreshCw, Trash2, Pencil, UserPlus } from "lucide-react";
 
 interface Group {
   id: number;
+  groupId: string;
   name: string;
-  whatsappGroupId?: string | null;
   description?: string | null;
   memberCount?: number | null;
 }
 
 export default function Groups() {
+  const queryClient = useQueryClient();
   const { data: groups, isLoading } = useListGroups();
   const { data: contacts } = useListContacts();
   const createGroup = useCreateGroup();
@@ -77,7 +80,7 @@ export default function Groups() {
     setForm({
       name: g.name ?? "",
       description: g.description ?? "",
-      whatsappGroupId: g.whatsappGroupId ?? "",
+      whatsappGroupId: g.groupId ?? "",
     });
     setShowEdit(true);
   }
@@ -141,10 +144,10 @@ export default function Groups() {
       { id: selected.id },
       {
         onSuccess: () => {
-          toast({ title: "Group deleted" });
+          toast({ title: "Left group and removed from list" });
           setShowDelete(false);
         },
-        onError: () => toast({ title: "Failed to delete", variant: "destructive" }),
+        onError: () => toast({ title: "Failed to remove group", variant: "destructive" }),
       }
     );
   }
@@ -165,8 +168,16 @@ export default function Groups() {
 
   function handleSync() {
     syncGroups.mutate(undefined, {
-      onSuccess: () => toast({ title: "Groups synced from WhatsApp" }),
-      onError: () => toast({ title: "Sync failed. Check WhatsApp connection.", variant: "destructive" }),
+      onSuccess: (data) => {
+        // Invalidate groups list so the UI refreshes immediately with synced data
+        void queryClient.invalidateQueries({ queryKey: getListGroupsQueryKey() });
+        toast({ title: data.message ?? "Groups synced from WhatsApp" });
+      },
+      onError: (err) => {
+        const msg = (err as { data?: { message?: string } }).data?.message
+          ?? "Sync failed. Make sure WhatsApp is connected.";
+        toast({ title: msg, variant: "destructive" });
+      },
     });
   }
 
@@ -269,14 +280,17 @@ export default function Groups() {
       <AlertDialog open={showDelete} onOpenChange={setShowDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Group</AlertDialogTitle>
+            <AlertDialogTitle>Remove Group</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong>{selected?.name}</strong>?
+              Are you sure you want to remove <strong>{selected?.name}</strong> from your list?
+              {selected?.groupId && !selected.groupId.startsWith("local-")
+                ? " The bot will also leave the WhatsApp group."
+                : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Remove</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

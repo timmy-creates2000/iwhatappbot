@@ -148,16 +148,6 @@ export default function Contacts() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
-      const lines = text.split("\n").filter(Boolean);
-      const contacts = lines.slice(1).map((line) => {
-        const [name, phone, tags = "", notes = ""] = line.split(",");
-        return {
-          name: name?.trim() ?? "",
-          phone: phone?.trim() ?? "",
-          tags: tags ? tags.split(";").map((t) => t.trim()) : [],
-          notes: notes?.trim() || undefined,
-        };
-      });
       bulkImport.mutate(
         { data: { text } },
         {

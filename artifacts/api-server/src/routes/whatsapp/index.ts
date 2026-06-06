@@ -57,17 +57,18 @@ router.post("/whatsapp/logout", async (req, res): Promise<void> => {
 // Protected — triggers live WhatsApp call, syncs only groups where connected number is admin
 router.post("/whatsapp/groups/sync", async (req, res): Promise<void> => {
   if (!whatsappService.getStatus().connected) {
-    res.status(400).json({ success: false, message: "Not connected to WhatsApp" });
+    res.status(400).json({ success: false, message: "Not connected to WhatsApp. Scan QR first." });
     return;
   }
 
   const groups = await whatsappService.fetchGroups();
-  if (!groups) {
-    res.status(400).json({ success: false, message: "Failed to fetch groups from WhatsApp" });
+  if (groups === null) {
+    // null means the Baileys call itself threw — transient error
+    res.status(500).json({ success: false, message: "Failed to fetch groups from WhatsApp. Try again." });
     return;
   }
 
-  // Clear existing groups and logs before re-syncing so stale data never lingers
+  // Clear existing groups and their logs, then re-insert synced groups
   await db.delete(groupLogsTable);
   await db.delete(groupsTable);
 
@@ -81,7 +82,12 @@ router.post("/whatsapp/groups/sync", async (req, res): Promise<void> => {
     );
   }
 
-  res.json({ success: true, message: `Synced ${groups.length} admin groups` });
+  res.json({
+    success: true,
+    message: groups.length > 0
+      ? `Synced ${groups.length} admin group${groups.length === 1 ? "" : "s"}`
+      : "No admin groups found. Make sure you are an admin in at least one WhatsApp group.",
+  });
 });
 
 export default router;

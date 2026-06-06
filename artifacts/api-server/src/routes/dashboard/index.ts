@@ -12,40 +12,41 @@ import {
 const router: IRouter = Router();
 
 router.get("/dashboard/stats", async (req, res): Promise<void> => {
-  const [{ totalContacts }] = await db
-    .select({ totalContacts: sql<number>`count(*)` })
-    .from(contactsTable);
-
-  const [{ totalGroups }] = await db
-    .select({ totalGroups: sql<number>`count(*)` })
-    .from(groupsTable);
-
   // SQLite stores dates as ISO text — compare as string (ISO sorts correctly)
   const todayIso = new Date();
   todayIso.setHours(0, 0, 0, 0);
   const todayStr = todayIso.toISOString();
 
-  const [{ messagesSentToday }] = await db
-    .select({ messagesSentToday: sql<number>`count(*)` })
-    .from(messageLogsTable)
-    .where(
-      sql`${messageLogsTable.status} = 'sent' AND ${messageLogsTable.sentAt} >= ${todayStr}`,
-    );
-
-  const [{ activeCampaigns }] = await db
-    .select({ activeCampaigns: sql<number>`count(*)` })
-    .from(campaignsTable)
-    .where(eq(campaignsTable.status, "running"));
-
-  const [{ totalSent }] = await db
-    .select({ totalSent: sql<number>`count(*)` })
-    .from(messageLogsTable)
-    .where(eq(messageLogsTable.status, "sent"));
-
-  const [{ totalFailed }] = await db
-    .select({ totalFailed: sql<number>`count(*)` })
-    .from(messageLogsTable)
-    .where(eq(messageLogsTable.status, "failed"));
+  // Run all 6 stat queries in parallel instead of sequentially
+  const [
+    [{ totalContacts }],
+    [{ totalGroups }],
+    [{ messagesSentToday }],
+    [{ activeCampaigns }],
+    [{ totalSent }],
+    [{ totalFailed }],
+  ] = await Promise.all([
+    db.select({ totalContacts: sql<number>`count(*)` }).from(contactsTable),
+    db.select({ totalGroups: sql<number>`count(*)` }).from(groupsTable),
+    db
+      .select({ messagesSentToday: sql<number>`count(*)` })
+      .from(messageLogsTable)
+      .where(
+        sql`${messageLogsTable.status} = 'sent' AND ${messageLogsTable.sentAt} >= ${todayStr}`,
+      ),
+    db
+      .select({ activeCampaigns: sql<number>`count(*)` })
+      .from(campaignsTable)
+      .where(eq(campaignsTable.status, "running")),
+    db
+      .select({ totalSent: sql<number>`count(*)` })
+      .from(messageLogsTable)
+      .where(eq(messageLogsTable.status, "sent")),
+    db
+      .select({ totalFailed: sql<number>`count(*)` })
+      .from(messageLogsTable)
+      .where(eq(messageLogsTable.status, "failed")),
+  ]);
 
   const totalSentNum = Number(totalSent ?? 0);
   const totalFailedNum = Number(totalFailed ?? 0);

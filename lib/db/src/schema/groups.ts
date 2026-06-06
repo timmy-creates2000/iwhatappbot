@@ -7,7 +7,7 @@ export const groupsTable = sqliteTable("groups", {
   groupId: text("group_id").notNull().unique(),
   name: text("name").notNull(),
   memberCount: integer("member_count"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 export const insertGroupSchema = createInsertSchema(groupsTable).omit({ id: true, createdAt: true });

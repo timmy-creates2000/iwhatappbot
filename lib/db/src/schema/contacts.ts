@@ -8,7 +8,7 @@ export const contactsTable = sqliteTable("contacts", {
   phone: text("phone").notNull().unique(),
   tags: text("tags", { mode: "json" }).$type<string[]>().default([]),
   notes: text("notes"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 export const insertContactSchema = createInsertSchema(contactsTable).omit({ id: true, createdAt: true });

@@ -52,9 +52,8 @@ router.post("/contacts/bulk", async (req, res): Promise<void> => {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  let imported = 0;
-  let skipped = 0;
   const errors: string[] = [];
+  const validRows: { name: string; phone: string }[] = [];
 
   for (const line of lines) {
     const parts = line.split(",").map((p) => p.trim());
@@ -67,19 +66,21 @@ router.post("/contacts/bulk", async (req, res): Promise<void> => {
       errors.push(`Missing name or phone: "${line}"`);
       continue;
     }
-
-    try {
-      await db
-        .insert(contactsTable)
-        .values({ name, phone })
-        .onConflictDoNothing({ target: contactsTable.phone });
-      imported++;
-    } catch {
-      skipped++;
-    }
+    validRows.push({ name, phone });
   }
 
-  res.json({ imported, skipped, errors });
+  if (!validRows.length) {
+    res.json({ imported: 0, skipped: 0, errors });
+    return;
+  }
+
+  // Batch insert — all rows in a single statement, skip duplicates by phone
+  await db
+    .insert(contactsTable)
+    .values(validRows)
+    .onConflictDoNothing({ target: contactsTable.phone });
+
+  res.json({ imported: validRows.length, skipped: errors.length, errors });
 });
 
 router.get("/contacts/:id", async (req, res): Promise<void> => {

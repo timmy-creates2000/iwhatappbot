@@ -10,7 +10,7 @@ export const campaignsTable = sqliteTable("campaigns", {
   status: text("status").notNull().default("draft"),
   startDate: text("start_date"),
   delayBetweenMessages: integer("delay_between_messages").default(1000), // in milliseconds
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 export const insertCampaignSchema = createInsertSchema(campaignsTable).omit({ id: true, createdAt: true });

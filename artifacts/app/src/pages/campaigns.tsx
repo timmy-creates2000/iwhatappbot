@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useListCampaigns,
   useCreateCampaign,
@@ -6,6 +7,7 @@ import {
   useDeleteCampaign,
   useStartCampaign,
   useListContacts,
+  getListCampaignsQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -61,6 +63,7 @@ type FormState = {
 };
 
 export default function Campaigns() {
+  const queryClient = useQueryClient();
   const { data: campaigns, isLoading } = useListCampaigns();
   const { data: contacts } = useListContacts();
   const createCampaign = useCreateCampaign();
@@ -132,7 +135,10 @@ export default function Campaigns() {
     runCampaign.mutate(
       { id: c.id },
       {
-        onSuccess: () => toast({ title: `Campaign "${c.name}" started` }),
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getListCampaignsQueryKey() });
+          toast({ title: `Campaign "${c.name}" started` });
+        },
         onError: (err) => {
           const msg = (err as { data?: { error?: string } }).data?.error
             ?? "Failed to run campaign. Check WhatsApp connection.";

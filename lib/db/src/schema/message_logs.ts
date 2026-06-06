@@ -10,7 +10,7 @@ export const messageLogsTable = sqliteTable("message_logs", {
   // pending | sent | failed
   status: text("status").notNull().default("pending"),
   sentAt: text("sent_at"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 export const insertMessageLogSchema = createInsertSchema(messageLogsTable).omit({ id: true, createdAt: true });

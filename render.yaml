@@ -51,9 +51,14 @@ services:
         value: info
 
     # ── WhatsApp session persistence ──────────────────────────────────────────
-    # Without a persistent disk, .wa-auth/ is wiped on every deploy and you
-    # must re-scan the QR code. Uncomment + upgrade to the "standard" plan
-    # to keep sessions alive across deploys.
+    # The .wa-auth/ directory stores the Baileys session credentials.
+    # Without a persistent disk, this is wiped on every deploy and you must
+    # re-scan the QR code each time.
+    #
+    # ⚠️  IMPORTANT: The starter plan does NOT support persistent disks.
+    # Upgrade to the "standard" plan ($7/mo) and uncomment the block below.
+    # Until then, expect to re-scan QR after every deploy.
+    #
     # disk:
     #   name: wa-auth-data
     #   mountPath: /opt/render/project/src/.wa-auth

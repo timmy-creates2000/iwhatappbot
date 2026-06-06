@@ -8,7 +8,7 @@ export const messageTemplatesTable = sqliteTable("message_templates", {
   content: text("content").notNull(),
   tone: text("tone"),
   purpose: text("purpose"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 export const insertMessageTemplateSchema = createInsertSchema(messageTemplatesTable).omit({ id: true, createdAt: true });

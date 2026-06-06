@@ -8,7 +8,7 @@ export const groupLogsTable = sqliteTable("group_logs", {
   groupId: integer("group_id"),
   // pending | added | failed
   status: text("status").notNull().default("pending"),
-  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
 export const insertGroupLogSchema = createInsertSchema(groupLogsTable).omit({ id: true, createdAt: true });
