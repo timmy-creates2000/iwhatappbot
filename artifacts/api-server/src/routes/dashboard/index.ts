@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, gte, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   db,
   contactsTable,
@@ -66,14 +66,29 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
 
 router.get("/dashboard/activity", async (req, res): Promise<void> => {
   const messageLogs = await db
-    .select()
+    .select({
+      id: messageLogsTable.id,
+      status: messageLogsTable.status,
+      createdAt: messageLogsTable.createdAt,
+      contactName: contactsTable.name,
+      contactPhone: contactsTable.phone,
+    })
     .from(messageLogsTable)
+    .leftJoin(contactsTable, eq(messageLogsTable.contactId, contactsTable.id))
     .orderBy(sql`${messageLogsTable.createdAt} desc`)
     .limit(10);
 
   const groupLogs = await db
-    .select()
+    .select({
+      id: groupLogsTable.id,
+      status: groupLogsTable.status,
+      createdAt: groupLogsTable.createdAt,
+      contactName: contactsTable.name,
+      groupName: groupsTable.name,
+    })
     .from(groupLogsTable)
+    .leftJoin(contactsTable, eq(groupLogsTable.contactId, contactsTable.id))
+    .leftJoin(groupsTable, eq(groupLogsTable.groupId, groupsTable.id))
     .orderBy(sql`${groupLogsTable.createdAt} desc`)
     .limit(10);
 
@@ -81,14 +96,14 @@ router.get("/dashboard/activity", async (req, res): Promise<void> => {
     ...messageLogs.map((l) => ({
       id: `msg-${l.id}`,
       type: "message",
-      message: `Message ${l.status} for contact #${l.contactId ?? "unknown"}`,
+      message: `Message ${l.status} for ${l.contactName ?? l.contactPhone ?? "unknown contact"}`,
       timestamp: l.createdAt,
       status: l.status,
     })),
     ...groupLogs.map((l) => ({
       id: `grp-${l.id}`,
       type: "group",
-      message: `Contact #${l.contactId ?? "unknown"} ${l.status} to group #${l.groupId ?? "unknown"}`,
+      message: `${l.contactName ?? "Unknown contact"} ${l.status} to ${l.groupName ?? "unknown group"}`,
       timestamp: l.createdAt,
       status: l.status,
     })),

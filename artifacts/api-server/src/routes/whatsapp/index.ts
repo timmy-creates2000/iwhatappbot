@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { whatsappService } from "../../lib/whatsapp";
-import { db, groupsTable } from "@workspace/db";
+import { db, groupsTable, groupLogsTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -48,10 +48,13 @@ router.post("/whatsapp/qr/refresh", async (req, res): Promise<void> => {
 // Protected — only the owner can disconnect
 router.post("/whatsapp/logout", async (req, res): Promise<void> => {
   await whatsappService.logout();
+  // Wipe all synced groups and their logs — next session is a clean slate
+  await db.delete(groupLogsTable);
+  await db.delete(groupsTable);
   res.json({ success: true, message: "Logged out successfully" });
 });
 
-// Protected — triggers live WhatsApp call
+// Protected — triggers live WhatsApp call, syncs only groups where connected number is admin
 router.post("/whatsapp/groups/sync", async (req, res): Promise<void> => {
   if (!whatsappService.getStatus().connected) {
     res.status(400).json({ success: false, message: "Not connected to WhatsApp" });
@@ -64,21 +67,21 @@ router.post("/whatsapp/groups/sync", async (req, res): Promise<void> => {
     return;
   }
 
-  for (const g of groups) {
-    await db
-      .insert(groupsTable)
-      .values({
+  // Clear existing groups and logs before re-syncing so stale data never lingers
+  await db.delete(groupLogsTable);
+  await db.delete(groupsTable);
+
+  if (groups.length > 0) {
+    await db.insert(groupsTable).values(
+      groups.map((g) => ({
         groupId: g.id,
         name: g.subject,
         memberCount: g.participants?.length ?? null,
-      })
-      .onConflictDoUpdate({
-        target: groupsTable.groupId,
-        set: { name: g.subject, memberCount: g.participants?.length ?? null },
-      });
+      }))
+    );
   }
 
-  res.json({ success: true, message: `Synced ${groups.length} groups` });
+  res.json({ success: true, message: `Synced ${groups.length} admin groups` });
 });
 
 export default router;
