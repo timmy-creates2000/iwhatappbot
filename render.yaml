@@ -5,7 +5,8 @@ services:
     region: oregon
     plan: starter
 
-    buildCommand: "npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/app run build && pnpm --filter @workspace/api-server run build && ls -la artifacts/app/dist/public || echo 'WARN: frontend dist missing'"
+    # Frontend is pre-built and committed — only build the API server
+    buildCommand: "npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/api-server run build"
 
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
 
@@ -18,5 +19,5 @@ services:
         value: "10000"
       - key: LOG_LEVEL
         value: info
-      # Set TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, APP_PASSWORD, GEMINI_API_KEY
-      # manually in the Render dashboard — do NOT put secrets in this file
+      # Set these in the Render dashboard manually:
+      # TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, APP_PASSWORD, GEMINI_API_KEY

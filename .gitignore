@@ -13,6 +13,10 @@ venv/
 # Build artifacts
 dist/
 build/
+# Exception: commit the pre-built frontend so Render can serve it without building
+!artifacts/app/dist/
+!artifacts/app/dist/public/
+!artifacts/app/dist/public/**
 *.pyc
 *.class
 *.o
