@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import fs from "fs";
 
 interface WhatsAppStatusData {
   connected: boolean;
@@ -114,8 +115,13 @@ class WhatsAppService {
                 this.initPromise = this._connect(nextAttempt);
               }, delayMs);
             } else {
-              // Logged out — allow re-initialization from scratch
+              // Logged out — wipe session so next init shows a fresh QR
+              this.clearAuthFiles();
               this.initPromise = null;
+              // Auto-start fresh connection so QR is ready immediately
+              setTimeout(() => {
+                this.initPromise = this._connect(0);
+              }, 1000);
             }
           }
 
@@ -146,6 +152,15 @@ class WhatsAppService {
     }
   }
 
+  private clearAuthFiles(): void {
+    try {
+      fs.rmSync(".wa-auth", { recursive: true, force: true });
+      logger.info("Cleared .wa-auth session directory");
+    } catch (err) {
+      logger.warn({ err }, "Failed to clear .wa-auth directory");
+    }
+  }
+
   async logout(): Promise<void> {
     try {
       if (this.sock) {
@@ -164,6 +179,12 @@ class WhatsAppService {
       phoneNumber: null,
       displayName: null,
     };
+    // Wipe saved session so next scan is always a fresh number
+    this.clearAuthFiles();
+    // Auto-start so QR is ready immediately after disconnect
+    setTimeout(() => {
+      this.initPromise = this._connect(0);
+    }, 500);
   }
 
   async fetchGroups(): Promise<GroupInfo[] | null> {

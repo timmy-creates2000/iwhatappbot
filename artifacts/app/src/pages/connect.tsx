@@ -98,9 +98,9 @@ export default function ConnectPage() {
     if (!authedPassword) return;
     logout.mutate(undefined, {
       onSuccess: () => {
-        clearPassword();
-        setAuthedPassword(null);
-        toast({ title: "Disconnected from WhatsApp" });
+        // Keep password unlocked so QR shows immediately for new number
+        toast({ title: "Disconnected — scan QR to connect a new number" });
+        setLocation("/connect");
       },
       onError: () => {
         toast({ title: "Failed to disconnect", variant: "destructive" });
