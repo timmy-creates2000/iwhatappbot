@@ -33,13 +33,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Users, Plus, RefreshCw, Trash2, Pencil, UserPlus } from "lucide-react";
 
@@ -68,7 +61,7 @@ export default function Groups() {
   const [showAddContact, setShowAddContact] = useState(false);
   const [selected, setSelected] = useState<Group | null>(null);
   const [form, setForm] = useState({ name: "", description: "", whatsappGroupId: "" });
-  const [selectedContactId, setSelectedContactId] = useState("");
+  const [selectedContactIds, setSelectedContactIds] = useState<number[]>([]);
 
   function openAdd() {
     setForm({ name: "", description: "", whatsappGroupId: "" });
@@ -92,7 +85,7 @@ export default function Groups() {
 
   function openAddContact(g: Group) {
     setSelected(g);
-    setSelectedContactId("");
+    setSelectedContactIds([]);
     setShowAddContact(true);
   }
 
@@ -156,15 +149,15 @@ export default function Groups() {
   }
 
   function handleAddContact() {
-    if (!selected || !selectedContactId) return;
+    if (!selected || selectedContactIds.length === 0) return;
     addContact.mutate(
-      { id: selected.id, data: { contactIds: [Number(selectedContactId)] } },
+      { id: selected.id, data: { contactIds: selectedContactIds } },
       {
         onSuccess: () => {
-          toast({ title: "Contact added to group" });
+          toast({ title: `${selectedContactIds.length} contact${selectedContactIds.length !== 1 ? "s" : ""} added to group` });
           setShowAddContact(false);
         },
-        onError: () => toast({ title: "Failed to add contact", variant: "destructive" }),
+        onError: () => toast({ title: "Failed to add contacts", variant: "destructive" }),
       }
     );
   }
@@ -300,27 +293,17 @@ export default function Groups() {
 
       {/* Add Contact to Group */}
       <Dialog open={showAddContact} onOpenChange={setShowAddContact}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add Contact to {selected?.name}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <Label>Select Contact</Label>
-            <Select value={selectedContactId} onValueChange={setSelectedContactId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a contact..." />
-              </SelectTrigger>
-              <SelectContent>
-                {(contacts ?? []).map((c) => (
-                  <SelectItem key={c.id} value={String(c.id)}>
-                    {c.name} — {c.phone}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Add Members to {selected?.name}</DialogTitle></DialogHeader>
+          <AddContactsForm
+            contacts={contacts ?? []}
+            selectedIds={selectedContactIds}
+            onChange={setSelectedContactIds}
+          />
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddContact(false)}>Cancel</Button>
-            <Button onClick={handleAddContact} disabled={addContact.isPending || !selectedContactId}>
-              {addContact.isPending ? "Adding..." : "Add"}
+            <Button onClick={handleAddContact} disabled={addContact.isPending || selectedContactIds.length === 0}>
+              {addContact.isPending ? "Adding..." : `Add ${selectedContactIds.length > 0 ? selectedContactIds.length : ""} Contact${selectedContactIds.length !== 1 ? "s" : ""}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -349,6 +332,74 @@ function GroupForm({
       <div className="space-y-1">
         <Label>WhatsApp Group ID</Label>
         <Input value={form.whatsappGroupId} onChange={(e) => onChange({ ...form, whatsappGroupId: e.target.value })} placeholder="120363000000000000@g.us" />
+      </div>
+    </div>
+  );
+}
+
+function AddContactsForm({
+  contacts,
+  selectedIds,
+  onChange,
+}: {
+  contacts: Array<{ id: number; name: string; phone: string }>;
+  selectedIds: number[];
+  onChange: (ids: number[]) => void;
+}) {
+  const allSelected = contacts.length > 0 && selectedIds.length === contacts.length;
+  const someSelected = selectedIds.length > 0 && !allSelected;
+
+  function toggleAll() {
+    onChange(allSelected ? [] : contacts.map((c) => c.id));
+  }
+
+  function toggle(id: number) {
+    onChange(
+      selectedIds.includes(id)
+        ? selectedIds.filter((x) => x !== id)
+        : [...selectedIds, id]
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label>Select Contacts ({selectedIds.length} / {contacts.length})</Label>
+        {contacts.length > 0 && (
+          <button type="button" onClick={toggleAll} className="text-xs text-primary hover:underline">
+            {allSelected ? "Deselect all" : "Select all"}
+          </button>
+        )}
+      </div>
+      <div className="max-h-64 overflow-y-auto border border-border rounded-md divide-y divide-border">
+        {contacts.length === 0 ? (
+          <p className="text-sm text-muted-foreground p-3">No contacts available.</p>
+        ) : (
+          <>
+            <label className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40 bg-muted/20 sticky top-0">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                onChange={toggleAll}
+                className="rounded"
+              />
+              <span className="text-sm font-medium">All contacts</span>
+            </label>
+            {contacts.map((c) => (
+              <label key={c.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(c.id)}
+                  onChange={() => toggle(c.id)}
+                  className="rounded"
+                />
+                <span className="text-sm">{c.name}</span>
+                <span className="text-xs text-muted-foreground ml-auto">{c.phone}</span>
+              </label>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );

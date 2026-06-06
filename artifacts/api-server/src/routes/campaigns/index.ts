@@ -121,7 +121,7 @@ router.post("/campaigns", async (req, res): Promise<void> => {
     .values({ 
       ...campaignData, 
       status: "draft",
-      delayBetweenMessages: delayBetweenMessages ?? 1000 
+      delayBetweenMessages: delayBetweenMessages ?? 3000 
     })
     .returning();
 
