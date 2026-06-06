@@ -1,12 +1,21 @@
 services:
-  # ── Backend API (Node.js Web Service) ────────────────────────────────────────
+  # ── Single Web Service (API + Frontend) ──────────────────────────────────────
+  # The Express API server also serves the pre-built React frontend in production.
+  # No separate static-site service is needed — no CORS or VITE_API_URL headaches.
   - type: web
-    name: iwhatsappbot-api
+    name: iwhatsappbot
     runtime: node
     region: oregon
-    plan: starter           # use "free" if you want, but it sleeps — bad for WA sessions
+    plan: starter
 
-    buildCommand: npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/api-server run build
+    # 1. Install pnpm, install deps, build frontend (static), then build API
+    buildCommand: >
+      npm install -g pnpm@9.15.4 &&
+      pnpm install --no-frozen-lockfile &&
+      pnpm --filter @workspace/app run build &&
+      pnpm --filter @workspace/api-server run build
+
+    # 2. Start the API server — it serves the built frontend too
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
 
     healthCheckPath: /api/healthz
@@ -14,48 +23,38 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+
+      # Render assigns its own PORT — leave this as-is
       - key: PORT
         value: "10000"
+
+      # ── REQUIRED: set these manually in the Render dashboard ─────────────────
+      # Get your Turso URL + token from https://app.turso.tech
       - key: TURSO_DATABASE_URL
-        sync: false               # set manually in Render dashboard
+        sync: false
+
       - key: TURSO_AUTH_TOKEN
-        sync: false               # set manually in Render dashboard
+        sync: false
+
+      # App password — protects all API routes and the QR login page
+      # Render auto-generates a strong random value; you can override it
       - key: APP_PASSWORD
-        generateValue: true       # Render auto-generates a strong random value
-      - key: ALLOWED_ORIGIN
-        sync: false               # set to your frontend URL after first deploy
+        generateValue: true
+
+      # ── OPTIONAL ─────────────────────────────────────────────────────────────
+      # Google Gemini API key for AI message composition
+      # Get a free key at: https://aistudio.google.com/app/apikey
       - key: GEMINI_API_KEY
-        sync: false               # optional
+        sync: false
+
       - key: LOG_LEVEL
         value: info
 
-    # Uncomment + upgrade to "standard" plan to keep WhatsApp session alive across deploys
+    # ── WhatsApp session persistence ──────────────────────────────────────────
+    # Without a persistent disk, .wa-auth/ is wiped on every deploy and you
+    # must re-scan the QR code. Uncomment + upgrade to the "standard" plan
+    # to keep sessions alive across deploys.
     # disk:
     #   name: wa-auth-data
-    #   mountPath: /opt/render/project/src/artifacts/api-server/.wa-auth
+    #   mountPath: /opt/render/project/src/.wa-auth
     #   sizeGB: 1
-
-  # ── Frontend (Static Site) ────────────────────────────────────────────────────
-  - type: web
-    name: iwhatsappbot-app
-    runtime: static
-    region: oregon
-
-    buildCommand: npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/app run build
-    staticPublishPath: artifacts/app/dist/public
-
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: BASE_PATH
-        value: "/"
-      # Point the frontend at the backend API service URL
-      # Set this to your actual Render backend URL after first deploy
-      - key: VITE_API_URL
-        sync: false
-
-    # SPA routing — serve index.html for all routes
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
