@@ -1,4 +1,11 @@
-import "dotenv/config";
+import path from "path";
+import { config as loadEnv } from "dotenv";
+import { fileURLToPath } from "url";
+
+// Load .env from workspace root regardless of cwd
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv({ path: path.resolve(__dirname, "../../.env") });
+loadEnv({ path: path.resolve(__dirname, "../../../.env") }); // fallback for dist/
 import app from "./app";
 import { logger } from "./lib/logger";
 import { whatsappService } from "./lib/whatsapp";

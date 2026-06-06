@@ -208,21 +208,15 @@ class WhatsAppService {
     if (!this.sock || !this.status.connected) return null;
     try {
       const groups = await this.sock.groupFetchAllParticipating();
-      const myPhone = this.status.phoneNumber;
 
-      // Only return groups where the connected number is admin or superadmin
-      const adminGroups = Object.values(groups).filter((g) => {
-        if (!myPhone) return false;
-        // Participant IDs can be bare JID or device-suffixed (e.g. 2347061201898:5@s.whatsapp.net)
-        const me = g.participants.find((p) => p.id.startsWith(myPhone));
-        return me?.admin === "admin" || me?.admin === "superadmin";
-      });
+      // Return ALL groups the connected number is participating in
+      const allGroups = Object.values(groups);
 
       logger.info(
-        { total: Object.keys(groups).length, adminOnly: adminGroups.length },
-        "Filtered groups to admin-only",
+        { total: allGroups.length },
+        "Fetched all participating groups",
       );
-      return adminGroups;
+      return allGroups;
     } catch (err) {
       logger.error({ err }, "Failed to fetch groups");
       return null;
