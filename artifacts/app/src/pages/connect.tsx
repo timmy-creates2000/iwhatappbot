@@ -98,9 +98,9 @@ export default function ConnectPage() {
     if (!authedPassword) return;
     logout.mutate(undefined, {
       onSuccess: () => {
-        // Keep password unlocked so QR shows immediately for new number
         toast({ title: "Disconnected — scan QR to connect a new number" });
-        setLocation("/connect");
+        // Keep authedPassword so QR screen shows immediately (no re-enter password)
+        // The QR polling will pick up the new QR code automatically
       },
       onError: () => {
         toast({ title: "Failed to disconnect", variant: "destructive" });

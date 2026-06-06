@@ -50,8 +50,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         return;
       }
 
-      clearPassword();
-      toast({ title: "Disconnected from WhatsApp" });
+      // Don't clear password — keep it so QR screen shows immediately on /connect
+      toast({ title: "Disconnected — scan QR to connect a new number" });
       setLocation("/connect");
     } catch {
       toast({ title: "Failed to disconnect", variant: "destructive" });

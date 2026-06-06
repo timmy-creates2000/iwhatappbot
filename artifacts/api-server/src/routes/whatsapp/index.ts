@@ -49,6 +49,12 @@ router.post("/whatsapp/logout", async (req, res): Promise<void> => {
   // Wipe all synced groups and their logs — next session is a clean slate
   await db.delete(groupLogsTable);
   await db.delete(groupsTable);
+
+  // Start fresh connection immediately so QR is ready when user goes to /connect
+  setTimeout(() => {
+    whatsappService.initialize().catch(() => {});
+  }, 500);
+
   res.json({ success: true, message: "Logged out successfully" });
 });
 
