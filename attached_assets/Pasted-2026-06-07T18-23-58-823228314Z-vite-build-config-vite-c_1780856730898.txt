@@ -1,0 +1,138 @@
+2026-06-07T18:23:58.823228314Z > vite build --config vite.config.ts
+2026-06-07T18:23:58.823231784Z 
+2026-06-07T18:23:59.161781582Z vite v7.3.5 building client environment for production...
+2026-06-07T18:23:59.214472792Z (node:203) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+2026-06-07T18:23:59.214488803Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-06-07T18:23:59.260361193Z transforming...
+2026-06-07T18:23:59.645024826Z src/components/ui/tooltip.tsx (2:0): Error when using sourcemap for reporting an error: Can't resolve original location of error.
+2026-06-07T18:24:01.049593349Z src/components/ui/label.tsx (2:0): Error when using sourcemap for reporting an error: Can't resolve original location of error.
+2026-06-07T18:24:01.067788275Z src/components/ui/progress.tsx (2:0): Error when using sourcemap for reporting an error: Can't resolve original location of error.
+2026-06-07T18:24:01.068684248Z src/components/ui/select.tsx (2:0): Error when using sourcemap for reporting an error: Can't resolve original location of error.
+2026-06-07T18:24:02.352089032Z ✓ 1848 modules transformed.
+2026-06-07T18:24:02.703850551Z rendering chunks...
+2026-06-07T18:24:02.713732919Z computing gzip size...
+2026-06-07T18:24:02.732838178Z dist/public/index.html                   1.51 kB │ gzip:   0.56 kB
+2026-06-07T18:24:02.732860208Z dist/public/assets/index-D-t4BGeL.css  122.27 kB │ gzip:  19.21 kB
+2026-06-07T18:24:02.732900049Z dist/public/assets/index-YcTIM8a7.js   714.74 kB │ gzip: 198.43 kB
+2026-06-07T18:24:02.732955331Z 
+2026-06-07T18:24:02.732965171Z (!) Some chunks are larger than 500 kB after minification. Consider:
+2026-06-07T18:24:02.732972431Z - Using dynamic import() to code-split the application
+2026-06-07T18:24:02.732980531Z - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+2026-06-07T18:24:02.732986331Z - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+2026-06-07T18:24:02.733209317Z ✓ built in 3.53s
+2026-06-07T18:24:03.278304972Z 
+2026-06-07T18:24:03.278331273Z > @workspace/api-server@0.0.0 build /opt/render/project/src/artifacts/api-server
+2026-06-07T18:24:03.278337163Z > node ./build.mjs
+2026-06-07T18:24:03.278342043Z 
+2026-06-07T18:24:04.71702116Z 
+2026-06-07T18:24:04.717052591Z   dist/index.mjs                      11.8mb ⚠️
+2026-06-07T18:24:04.717060371Z   dist/pino-worker.mjs               153.4kb
+2026-06-07T18:24:04.717065132Z   dist/pino-file.mjs                 142.1kb
+2026-06-07T18:24:04.717069972Z   dist/pino-pretty.mjs               114.6kb
+2026-06-07T18:24:04.717074862Z   dist/thread-stream-worker.mjs        7.3kb
+2026-06-07T18:24:04.717079762Z   dist/index.mjs.map                  17.9mb
+2026-06-07T18:24:04.717084752Z   dist/pino-worker.mjs.map           256.9kb
+2026-06-07T18:24:04.717089552Z   dist/pino-file.mjs.map             229.0kb
+2026-06-07T18:24:04.717094382Z   dist/pino-pretty.mjs.map           204.0kb
+2026-06-07T18:24:04.717098862Z   dist/thread-stream-worker.mjs.map   12.0kb
+2026-06-07T18:24:04.717103122Z 
+2026-06-07T18:24:04.717108583Z ⚡ Done in 1359ms
+2026-06-07T18:24:10.754558187Z ==> Uploading build...
+2026-06-07T18:24:24.896439969Z ==> Uploaded in 5.4s. Compression took 8.7s
+2026-06-07T18:24:24.954625198Z ==> Build successful 🎉
+2026-06-07T18:24:29.291129642Z ==> Deploying...
+2026-06-07T18:24:29.390184501Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-06-07T18:24:55.827106614Z ==> Running 'pnpm run start'
+2026-06-07T18:24:59.819384351Z 
+2026-06-07T18:24:59.819408591Z > workspace@0.0.0 start /opt/render/project/src
+2026-06-07T18:24:59.819412542Z > node --enable-source-maps artifacts/api-server/dist/index.mjs
+2026-06-07T18:24:59.819414702Z 
+2026-06-07T18:25:12.192078008Z ==> Your service is live 🎉
+2026-06-07T18:25:12.334815881Z ==> 
+2026-06-07T18:25:12.337300763Z ==> ///////////////////////////////////////////////////////////
+2026-06-07T18:25:12.339797575Z ==> 
+2026-06-07T18:25:12.342024609Z ==> Available at your primary URL https://iwhatappbot-mgo7.onrender.com
+2026-06-07T18:25:12.347346223Z ==> 
+2026-06-07T18:25:12.350497913Z ==> ///////////////////////////////////////////////////////////
+2026-06-07T18:25:10.323363338Z [18:25:09.418] INFO (84): Server listening
+2026-06-07T18:25:10.323389348Z     port: 8080
+2026-06-07T18:25:10.415708507Z [18:25:10.319] INFO (84): request completed
+2026-06-07T18:25:10.415738588Z     req: {
+2026-06-07T18:25:10.415744928Z       "id": 1,
+2026-06-07T18:25:10.415750778Z       "method": "HEAD",
+2026-06-07T18:25:10.415756918Z       "url": "/"
+2026-06-07T18:25:10.415762709Z     }
+2026-06-07T18:25:10.415768569Z     res: {
+2026-06-07T18:25:10.415774399Z       "statusCode": 404
+2026-06-07T18:25:10.415780849Z     }
+2026-06-07T18:25:10.415786149Z     responseTime: 95
+2026-06-07T18:25:10.900962504Z [18:25:10.733] INFO (84): connected to WA
+2026-06-07T18:25:10.901002395Z     module: "baileys"
+2026-06-07T18:25:10.901011516Z     browser: [
+2026-06-07T18:25:10.901016566Z       "Mac OS",
+2026-06-07T18:25:10.901021336Z       "Chrome",
+2026-06-07T18:25:10.901026066Z       "14.4.1"
+2026-06-07T18:25:10.901030826Z     ]
+2026-06-07T18:25:10.901035286Z     helloMsg: {
+2026-06-07T18:25:10.901040166Z       "clientHello": {
+2026-06-07T18:25:10.901045616Z         "ephemeral": "6B/2oUrA+b4H22BwV5pt2ZHjLmQ+EEMmzOgnts58FFY="
+2026-06-07T18:25:10.901050177Z       }
+2026-06-07T18:25:10.901054757Z     }
+2026-06-07T18:25:11.244814625Z [18:25:11.122] INFO (84): not logged in, attempting registration...
+2026-06-07T18:25:11.244853466Z     module: "baileys"
+2026-06-07T18:25:11.244859546Z     node: {
+2026-06-07T18:25:11.244864036Z       "passive": false,
+2026-06-07T18:25:11.244868417Z       "userAgent": {
+2026-06-07T18:25:11.244873577Z         "platform": "WEB",
+2026-06-07T18:25:11.244878717Z         "appVersion": {
+2026-06-07T18:25:11.244882197Z           "primary": 2,
+2026-06-07T18:25:11.244885177Z           "secondary": 3000,
+2026-06-07T18:25:11.244888327Z           "tertiary": 1035194821
+2026-06-07T18:25:11.244891417Z         },
+2026-06-07T18:25:11.244894517Z         "mcc": "000",
+2026-06-07T18:25:11.244897587Z         "mnc": "000",
+2026-06-07T18:25:11.244900617Z         "osVersion": "0.1",
+2026-06-07T18:25:11.244903647Z         "device": "Desktop",
+2026-06-07T18:25:11.244906627Z         "osBuildNumber": "0.1",
+2026-06-07T18:25:11.244910147Z         "releaseChannel": "RELEASE",
+2026-06-07T18:25:11.244913247Z         "localeLanguageIso6391": "en",
+2026-06-07T18:25:11.244916227Z         "localeCountryIso31661Alpha2": "US"
+2026-06-07T18:25:11.244919248Z       },
+2026-06-07T18:25:11.244922328Z       "webInfo": {
+2026-06-07T18:25:11.244925388Z         "webSubPlatform": "WEB_BROWSER"
+2026-06-07T18:25:11.244928408Z       },
+2026-06-07T18:25:11.244931378Z       "connectType": "WIFI_UNKNOWN",
+2026-06-07T18:25:11.244934378Z       "connectReason": "USER_ACTIVATED",
+2026-06-07T18:25:11.244937408Z       "devicePairingData": {
+2026-06-07T18:25:11.244940398Z         "eRegid": "AAAAHA==",
+2026-06-07T18:25:11.244943408Z         "eKeytype": "BQ==",
+2026-06-07T18:25:11.244947258Z         "eIdent": "6+XQOtMlpWtk+OTPG5wKR8iokpzjfnSbWlbwGBXcGSQ=",
+2026-06-07T18:25:11.244950288Z         "eSkeyId": "AAAB",
+2026-06-07T18:25:11.244953308Z         "eSkeyVal": "0pY+LHNUOGivVZK0bGH7UIoJmPftfU/a0ORRRs3GGnE=",
+2026-06-07T18:25:11.244971949Z         "eSkeySig": "8+63coyqAF5QkVMK052WOJrqkGeAZqJS/xROha5phErvATvJTRBO4wlmZXAG/5vzF/2NVUToR9BgWDpz/9EVDg==",
+2026-06-07T18:25:11.244975139Z         "buildHash": "oslHHv+RCp4a5lmJCiiHLQ==",
+2026-06-07T18:25:11.244977209Z         "deviceProps": "CgZNYWMgT1MSBggKEA8YBxgBIAEqFxiAUCABMAA4AUABSAFQAVgBYAFwAXgA"
+2026-06-07T18:25:11.24499546Z       },
+2026-06-07T18:25:11.24499956Z       "pull": false
+2026-06-07T18:25:11.24500271Z     }
+2026-06-07T18:25:11.974010157Z [18:25:11.921] INFO (84): QR code generated
+2026-06-07T18:25:12.487936514Z [18:25:12.272] INFO (84): request completed
+2026-06-07T18:25:12.487954275Z     req: {
+2026-06-07T18:25:12.487957895Z       "id": 2,
+2026-06-07T18:25:12.487961005Z       "method": "GET",
+2026-06-07T18:25:12.487964095Z       "url": "/"
+2026-06-07T18:25:12.487967325Z     }
+2026-06-07T18:25:12.487970295Z     res: {
+2026-06-07T18:25:12.487973385Z       "statusCode": 404
+2026-06-07T18:25:12.487976425Z     }
+2026-06-07T18:25:12.488009656Z     responseTime: 1
+2026-06-07T18:25:15.539041392Z [18:25:15.143] INFO (84): request completed
+2026-06-07T18:25:15.539066542Z     req: {
+2026-06-07T18:25:15.539072463Z       "id": 3,
+2026-06-07T18:25:15.539077763Z       "method": "GET",
+2026-06-07T18:25:15.539082393Z       "url": "/"
+2026-06-07T18:25:15.539086843Z     }
+2026-06-07T18:25:15.539091693Z     res: {
+2026-06-07T18:25:15.539096103Z       "statusCode": 404
+2026-06-07T18:25:15.539100393Z     }
+2026-06-07T18:25:15.539105823Z     responseTime: 0
