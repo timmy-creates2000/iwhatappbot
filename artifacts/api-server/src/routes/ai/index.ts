@@ -52,16 +52,24 @@ Requirements:
 - Return ONLY the message text, nothing else`;
 
     const response = await genAI.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.0-flash-lite",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: { maxOutputTokens: 1024 },
     });
 
-    const text = response.text;
-    res.json({ message: text?.trim() ?? topic });
+    const text =
+      typeof response.text === "function"
+        ? (response.text as () => string)()
+        : response.text;
+
+    if (!text || text.trim() === "") {
+      throw new Error("Empty response from Gemini");
+    }
+
+    res.json({ message: text.trim() });
   } catch (err) {
     logger.error({ err }, "AI compose error");
-    res.json({ message: topic });
+    res.status(500).json({ error: "AI generation failed. Check your GEMINI_API_KEY and try again." });
   }
 });
 
