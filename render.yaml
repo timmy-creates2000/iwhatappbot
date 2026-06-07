@@ -8,10 +8,9 @@ services:
     # Build the frontend first, then the API server bundle.
     # The API server serves the built frontend as static files in production.
     buildCommand: >
-      npm install -g pnpm@9.15.4 &&
-      pnpm install --frozen-lockfile &&
-      pnpm --filter @workspace/app run build &&
-      pnpm --filter @workspace/api-server run build
+      npm install -g pnpm@10.26.1 &&
+      pnpm install --no-frozen-lockfile &&
+      pnpm run build
 
     # Start the bundled API server (it also serves the frontend static files)
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
