@@ -2,8 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
-import { existsSync, readdirSync } from "fs";
-import { fileURLToPath } from "url";
+import { existsSync } from "fs";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
@@ -43,49 +42,30 @@ app.use(express.urlencoded({ extended: true, limit: "50kb" }));
 app.use("/api", router);
 
 // ── Frontend static files (production) ───────────────────────────────────────
+// On Render: startCommand runs from repo root = /opt/render/project/src
+// Frontend built to: artifacts/app/dist/public  (relative to repo root)
+// process.cwd() always equals the repo root when Render runs the start command
 if (process.env["NODE_ENV"] === "production") {
-  // Resolve __dirname for both ESM (dist bundle) and tsx (src)
-  const _dirname = typeof __dirname !== "undefined"
-    ? __dirname
-    : path.dirname(fileURLToPath(import.meta.url));
+  const frontendDist = path.join(process.cwd(), "artifacts", "app", "dist", "public");
 
-  const cwd = process.cwd();
+  console.log("[frontend] cwd:", process.cwd());
+  console.log("[frontend] looking for dist at:", frontendDist);
+  console.log("[frontend] exists:", existsSync(frontendDist));
 
-  // All candidate paths — first one that exists wins
-  const candidates = [
-    path.resolve(cwd, "artifacts/app/dist/public"),
-    path.resolve(_dirname, "../../app/dist/public"),
-    path.resolve(_dirname, "../../../artifacts/app/dist/public"),
-    path.resolve(_dirname, "../../../../artifacts/app/dist/public"),
-  ];
-
-  const frontendDist = candidates.find(existsSync) ?? null;
-
-  // Always log so we can see in Render logs what happened
-  console.log("[app] cwd:", cwd);
-  console.log("[app] __dirname:", _dirname);
-  console.log("[app] candidates:", candidates);
-  console.log("[app] frontendDist:", frontendDist);
-
-  if (frontendDist) {
+  if (existsSync(frontendDist)) {
     app.use(express.static(frontendDist));
     app.get("*", (_req, res) => {
       res.sendFile(path.join(frontendDist, "index.html"));
     });
     logger.info({ frontendDist }, "Serving frontend static files");
   } else {
-    logger.error({ cwd, candidates }, "Frontend dist NOT found");
+    logger.error({ frontendDist }, "Frontend dist NOT found");
     app.get("*", (_req, res) => {
-      // Show diagnostic page instead of raw 404
-      let listing = "";
-      try { listing = readdirSync(cwd).join(", "); } catch { listing = "error reading cwd"; }
       res.status(503).send(`
         <h2>Frontend not found</h2>
-        <p><b>cwd:</b> ${cwd}</p>
-        <p><b>__dirname:</b> ${_dirname}</p>
-        <p><b>Tried:</b><br>${candidates.join("<br>")}</p>
-        <p><b>cwd contents:</b> ${listing}</p>
-        <p><a href="/api/healthz">API healthz</a></p>
+        <p>Expected at: <code>${frontendDist}</code></p>
+        <p>cwd: <code>${process.cwd()}</code></p>
+        <p><a href="/api/healthz">API is running ✓</a></p>
       `);
     });
   }
