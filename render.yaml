@@ -2,11 +2,11 @@ services:
   - type: web
     name: iwhatsappbot
     runtime: node
-    region: oregon
+    region: virginia
     plan: starter
 
-    # Frontend is pre-built and committed — only build the API server
-    buildCommand: "npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/api-server run build"
+    # Build both frontend and API server
+    buildCommand: "npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/app run build && pnpm --filter @workspace/api-server run build"
 
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
 
@@ -19,5 +19,5 @@ services:
         value: "10000"
       - key: LOG_LEVEL
         value: info
-      # Set these in the Render dashboard manually:
+      # Set these in Render dashboard manually:
       # TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, APP_PASSWORD, GEMINI_API_KEY
