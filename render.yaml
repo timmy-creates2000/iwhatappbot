@@ -5,9 +5,15 @@ services:
     region: virginia
     plan: starter
 
-    # Build both frontend and API server
-    buildCommand: "npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm --filter @workspace/app run build && pnpm --filter @workspace/api-server run build"
+    # Build the frontend first, then the API server bundle.
+    # The API server serves the built frontend as static files in production.
+    buildCommand: >
+      npm install -g pnpm@9.15.4 &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @workspace/app run build &&
+      pnpm --filter @workspace/api-server run build
 
+    # Start the bundled API server (it also serves the frontend static files)
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
 
     healthCheckPath: /api/healthz
@@ -19,5 +25,12 @@ services:
         value: "10000"
       - key: LOG_LEVEL
         value: info
-      # Set these in Render dashboard manually:
-      # TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, APP_PASSWORD, GEMINI_API_KEY
+      # ── Set these manually in Render dashboard → Environment ──────────────
+      # - key: TURSO_DATABASE_URL
+      #   value: libsql://your-db.turso.io
+      # - key: TURSO_AUTH_TOKEN
+      #   value: your-turso-token
+      # - key: APP_PASSWORD
+      #   value: your-app-password
+      # - key: GEMINI_API_KEY
+      #   value: your-gemini-key
