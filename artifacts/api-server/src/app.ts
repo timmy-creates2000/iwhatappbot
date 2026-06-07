@@ -2,7 +2,8 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
-import { existsSync } from "fs";
+import { existsSync, readdirSync } from "fs";
+import { fileURLToPath } from "url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
@@ -14,11 +15,7 @@ app.use(
     logger,
     serializers: {
       req(req: { id: string; method: string; url?: string }) {
-        return {
-          id: req.id,
-          method: req.method,
-          url: req.url?.split("?")[0],
-        };
+        return { id: req.id, method: req.method, url: req.url?.split("?")[0] };
       },
       res(res: { statusCode: number }) {
         return { statusCode: res.statusCode };
@@ -46,26 +43,29 @@ app.use(express.urlencoded({ extended: true, limit: "50kb" }));
 app.use("/api", router);
 
 // ── Frontend static files (production) ───────────────────────────────────────
-// Bundle lands at:   <repo>/artifacts/api-server/dist/index.mjs
-//   → __dirname  =   <repo>/artifacts/api-server/dist
-// Frontend build at: <repo>/artifacts/app/dist/public
-//   → relative  =   ../../app/dist/public  (from __dirname)
-// Also try process.cwd() which = repo root on Render
 if (process.env["NODE_ENV"] === "production") {
-  const fromDirname = path.resolve(__dirname, "../../app/dist/public");
-  const fromCwd     = path.resolve(process.cwd(), "artifacts/app/dist/public");
+  // Resolve __dirname for both ESM (dist bundle) and tsx (src)
+  const _dirname = typeof __dirname !== "undefined"
+    ? __dirname
+    : path.dirname(fileURLToPath(import.meta.url));
 
-  const frontendDist = existsSync(fromDirname) ? fromDirname
-    : existsSync(fromCwd) ? fromCwd
-    : null;
+  const cwd = process.cwd();
 
-  logger.info({
-    __dirname,
-    cwd: process.cwd(),
-    fromDirname,
-    fromCwd,
-    found: frontendDist,
-  }, "Frontend dist lookup");
+  // All candidate paths — first one that exists wins
+  const candidates = [
+    path.resolve(cwd, "artifacts/app/dist/public"),
+    path.resolve(_dirname, "../../app/dist/public"),
+    path.resolve(_dirname, "../../../artifacts/app/dist/public"),
+    path.resolve(_dirname, "../../../../artifacts/app/dist/public"),
+  ];
+
+  const frontendDist = candidates.find(existsSync) ?? null;
+
+  // Always log so we can see in Render logs what happened
+  console.log("[app] cwd:", cwd);
+  console.log("[app] __dirname:", _dirname);
+  console.log("[app] candidates:", candidates);
+  console.log("[app] frontendDist:", frontendDist);
 
   if (frontendDist) {
     app.use(express.static(frontendDist));
@@ -74,14 +74,18 @@ if (process.env["NODE_ENV"] === "production") {
     });
     logger.info({ frontendDist }, "Serving frontend static files");
   } else {
-    logger.error({ fromDirname, fromCwd }, "Frontend dist NOT found — frontend build failed");
-    // Helpful fallback instead of raw 404
+    logger.error({ cwd, candidates }, "Frontend dist NOT found");
     app.get("*", (_req, res) => {
+      // Show diagnostic page instead of raw 404
+      let listing = "";
+      try { listing = readdirSync(cwd).join(", "); } catch { listing = "error reading cwd"; }
       res.status(503).send(`
-        <h1>Frontend not built</h1>
-        <p>The React app build failed. Check Render build logs.</p>
-        <p>Expected at: <code>${fromDirname}</code></p>
-        <p>API is running at: <a href="/api/healthz">/api/healthz</a></p>
+        <h2>Frontend not found</h2>
+        <p><b>cwd:</b> ${cwd}</p>
+        <p><b>__dirname:</b> ${_dirname}</p>
+        <p><b>Tried:</b><br>${candidates.join("<br>")}</p>
+        <p><b>cwd contents:</b> ${listing}</p>
+        <p><a href="/api/healthz">API healthz</a></p>
       `);
     });
   }
