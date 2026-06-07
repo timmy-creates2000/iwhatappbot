@@ -1,0 +1,34 @@
+2026-06-07T18:33:36.362589598Z ==> Downloading cache...
+2026-06-07T18:33:36.403757587Z ==> Cloning from https://github.com/timmy-creates2000/iwhatappbot
+2026-06-07T18:33:36.724347165Z ==> Checking out commit 623b89034f8ba077e0ad8590a6a1df723ed94e2b in branch main
+2026-06-07T18:33:45.199914445Z ==> Downloaded 155MB in 2s. Extraction took 7s.
+2026-06-07T18:33:48.719108746Z ==> Requesting Node.js version >=18
+2026-06-07T18:33:48.835664697Z ==> Using Node.js version 26.3.0 via /opt/render/project/src/package.json
+2026-06-07T18:33:48.835680907Z ==> Docs on specifying a Node.js version: https://render.com/docs/node-version
+2026-06-07T18:33:48.835804281Z ==> Installing Node.js version 26.3.0...
+2026-06-07T18:33:50.055363481Z ==> Running build command 'npm install -g pnpm@9.15.4 && pnpm install --no-frozen-lockfile && pnpm run build'...
+2026-06-07T18:33:51.141426974Z 
+2026-06-07T18:33:51.141453664Z added 1 package in 991ms
+2026-06-07T18:33:51.141629469Z 
+2026-06-07T18:33:51.141748692Z 1 package is looking for funding
+2026-06-07T18:33:51.141826844Z   run `npm fund` for details
+2026-06-07T18:33:51.618439046Z Scope: all 10 workspace projects
+2026-06-07T18:33:53.612457004Z 
+2026-06-07T18:33:53.612480054Z devDependencies: skipped because NODE_ENV is set to production
+2026-06-07T18:33:53.612484454Z 
+2026-06-07T18:33:53.61418804Z Done in 2.3s
+2026-06-07T18:33:54.040807215Z 
+2026-06-07T18:33:54.040837266Z > workspace@0.0.0 build /opt/render/project/src
+2026-06-07T18:33:54.040841966Z > pnpm --filter @workspace/app run build && pnpm --filter @workspace/api-server run build
+2026-06-07T18:33:54.040846536Z 
+2026-06-07T18:33:54.46927647Z 
+2026-06-07T18:33:54.469305821Z > @workspace/app@0.0.0 build /opt/render/project/src/artifacts/app
+2026-06-07T18:33:54.469311521Z > vite build --config vite.config.ts
+2026-06-07T18:33:54.469315871Z 
+2026-06-07T18:33:54.474050229Z sh: 1: vite: not found
+2026-06-07T18:33:54.475474737Z /opt/render/project/src/artifacts/app:
+2026-06-07T18:33:54.475484837Z  ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @workspace/app@0.0.0 build: `vite build --config vite.config.ts`
+2026-06-07T18:33:54.475489387Z spawn ENOENT
+2026-06-07T18:33:54.495496217Z  ELIFECYCLE  Command failed with exit code 1.
+2026-06-07T18:33:54.544912028Z ==> Build failed 😞
+2026-06-07T18:33:54.544936789Z ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys

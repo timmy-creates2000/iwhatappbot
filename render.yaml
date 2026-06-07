@@ -5,11 +5,12 @@ services:
     region: virginia
     plan: starter
 
-    # Build the frontend first, then the API server bundle.
-    # The API server serves the built frontend as static files in production.
+    # NODE_ENV must be 'development' during install so pnpm includes devDependencies
+    # (vite, tailwind, etc. are devDeps needed to build the frontend).
+    # The app itself runs in production mode via the NODE_ENV env var below.
     buildCommand: >
       npm install -g pnpm@10.26.1 &&
-      pnpm install --no-frozen-lockfile &&
+      NODE_ENV=development pnpm install --no-frozen-lockfile &&
       pnpm run build
 
     # Start the bundled API server (it also serves the frontend static files)
@@ -21,7 +22,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: "10000"
+        value: "8080"
       - key: LOG_LEVEL
         value: info
       # ── Set these manually in Render dashboard → Environment ──────────────
