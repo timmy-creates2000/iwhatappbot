@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { whatsappService } from "../../lib/whatsapp";
-import { db, groupsTable } from "@workspace/db";
+import { db, groupsTable, groupLogsTable } from "@workspace/db";
 import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
@@ -24,58 +24,48 @@ interface SyncState {
 const syncState: SyncState = { status: "idle", lastSync: null, error: null };
 
 async function runGroupSync(): Promise<void> {
-  // fetchAllGroups() uses the in-memory cache built from groups.upsert events —
-  // no 50-group cap. groupFetchAllParticipating() is hard-capped by WhatsApp's
-  // protocol so we never use it for sync decisions.
+  // Use the in-memory cache built from groups.upsert events — no 50-group cap.
+  // groupFetchAllParticipating() is hard-capped at ~50 by WhatsApp's protocol.
   const waGroups = await whatsappService.fetchAllGroups();
+
   if (waGroups === null) {
-    throw new Error("Failed to fetch groups from WhatsApp");
+    throw new Error("Not connected to WhatsApp");
   }
 
-  let added = 0;
-  let updated = 0;
-
-  if (waGroups.length > 0) {
-    const existing = await db.select().from(groupsTable);
-    const existingByGroupId = new Map(existing.map((g) => [g.groupId, g]));
-
-    const toInsert = waGroups.filter((g) => !existingByGroupId.has(g.id));
-    const toUpdate = waGroups.filter((g) => {
-      const row = existingByGroupId.get(g.id);
-      return row && (row.name !== g.subject || row.memberCount !== (g.participants?.length ?? null));
-    });
-
-    if (toInsert.length > 0) {
-      await db.insert(groupsTable).values(
-        toInsert.map((g) => ({
-          groupId: g.id,
-          name: g.subject,
-          memberCount: g.participants?.length ?? null,
-        }))
-      );
-      added = toInsert.length;
-    }
-
-    for (const g of toUpdate) {
-      const row = existingByGroupId.get(g.id)!;
-      await db
-        .update(groupsTable)
-        .set({ name: g.subject, memberCount: g.participants?.length ?? null })
-        .where(eq(groupsTable.id, row.id));
-    }
-    updated = toUpdate.length;
-
-    // NOTE: We intentionally do NOT delete "stale" groups here.
-    // groupFetchAllParticipating() is capped at ~50 by WhatsApp's protocol,
-    // so any deletion based on what the API returns would wrongly remove
-    // groups beyond that cap. Groups the user has left will stop receiving
-    // real-time events and can be removed manually from the UI.
+  if (waGroups.length === 0) {
+    throw new Error(
+      "Group cache is empty. Wait a few seconds after connecting for WhatsApp to finish streaming all groups, then try again."
+    );
   }
+
+  // Full resync: delete every WA-synced row (not local-* ones), then
+  // re-insert the complete cache. This is safe because the cache contains
+  // every group WhatsApp streamed via groups.upsert on connect (no cap).
+  const existing = await db.select().from(groupsTable);
+  const waGroupIds = existing
+    .filter((g) => !g.groupId.startsWith("local-"))
+    .map((g) => g.id);
+
+  if (waGroupIds.length > 0) {
+    await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, waGroupIds));
+    await db.delete(groupsTable).where(inArray(groupsTable.id, waGroupIds));
+  }
+
+  // Re-insert all groups from cache
+  await db.insert(groupsTable).values(
+    waGroups.map((g) => ({
+      groupId: g.id,
+      name: g.subject,
+      memberCount: g.participants?.length ?? null,
+    }))
+  );
+
+  logger.info({ total: waGroups.length, removed: waGroupIds.length }, "Group resync complete");
 
   syncState.lastSync = {
-    added,
-    updated,
-    removed: 0,
+    added: waGroups.length,
+    updated: 0,
+    removed: waGroupIds.length,
     total: waGroups.length,
     completedAt: new Date().toISOString(),
   };

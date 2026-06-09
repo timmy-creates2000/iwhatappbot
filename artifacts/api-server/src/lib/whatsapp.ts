@@ -292,6 +292,18 @@ class WhatsAppService {
         );
         if (!relevant.length) return;
 
+        // Keep cache in sync so manual sync reflects latest group state
+        for (const u of relevant) {
+          const cached = this._groupCache.get(u.id);
+          if (cached) {
+            this._groupCache.set(u.id, {
+              ...cached,
+              ...(u.subject !== undefined ? { subject: u.subject } : {}),
+              ...(u.participants !== undefined ? { participants: u.participants } : {}),
+            });
+          }
+        }
+
         Promise.all(
           relevant.map((u) =>
             db
