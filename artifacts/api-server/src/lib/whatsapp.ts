@@ -5,9 +5,6 @@ import { fileURLToPath } from "url";
 import { eq, inArray } from "drizzle-orm";
 import { db, groupsTable, groupLogsTable } from "@workspace/db";
 
-// Resolve .wa-auth relative to the workspace root, not cwd
-// In dev (tsx): __dirname = src/, workspace root = ../../
-// In prod (dist): __dirname = dist/, workspace root = ../../
 const _dirname = path.dirname(fileURLToPath(import.meta.url));
 const WA_AUTH_DIR = path.resolve(_dirname, "../../.wa-auth");
 
@@ -30,7 +27,13 @@ interface GroupUpdate {
   participants?: Array<{ id: string; admin?: string | null }>;
 }
 
-/** Minimal typed interface for the Baileys WASocket we actually use */
+interface WAMessageKey {
+  remoteJid?: string | null;
+  fromMe?: boolean | null;
+  id?: string | null;
+  participant?: string | null;
+}
+
 interface WASocketLike {
   user?: { id?: string; name?: string };
   ev: {
@@ -50,13 +53,12 @@ interface WASocketLike {
   sendMessage(jid: string, content: { text: string }): Promise<unknown>;
 }
 
-/** Normalize phone to JID: strip leading +, append @s.whatsapp.net */
 export function toJid(phone: string): string {
   const digits = phone.startsWith("+") ? phone.slice(1) : phone;
   return `${digits}@s.whatsapp.net`;
 }
 
-// ── Group upsert helper (shared by event handler + manual sync) ───────────────
+// ── Group DB helpers ───────────────────────────────────────────────────────────
 
 async function upsertGroups(groups: GroupInfo[]): Promise<void> {
   for (const g of groups) {
@@ -77,6 +79,8 @@ async function upsertGroups(groups: GroupInfo[]): Promise<void> {
   }
 }
 
+// ── WhatsApp Service ──────────────────────────────────────────────────────────
+
 class WhatsAppService {
   private sock: WASocketLike | null = null;
   private qr: string | null = null;
@@ -87,11 +91,12 @@ class WhatsAppService {
     displayName: null,
   };
 
-  // Use a promise so concurrent initialize() calls all wait on the same init
   private initPromise: Promise<void> | null = null;
-
-  // Flag set during intentional logout — prevents auto-reconnect
   private _intentionalLogout = false;
+
+  // Reconnect backoff — reset to 0 after any stable connection (>30s uptime)
+  private _reconnectAttempt = 0;
+  private _connectedSince: number | null = null;
 
   getStatus(): WhatsAppStatusData {
     return this.status;
@@ -104,12 +109,11 @@ class WhatsAppService {
   initialize(): Promise<void> {
     if (this.initPromise) return this.initPromise;
     this._intentionalLogout = false;
-    this.initPromise = this._connect(0);
+    this.initPromise = this._connect();
     return this.initPromise;
   }
 
-  private async _connect(attempt: number): Promise<void> {
-    // Don't reconnect if user intentionally logged out
+  private async _connect(): Promise<void> {
     if (this._intentionalLogout) return;
 
     try {
@@ -125,130 +129,175 @@ class WhatsAppService {
       const sock = makeWASocket({
         auth: state,
         printQRInTerminal: false,
-        logger: logger.child({
-          module: "baileys",
-        }) as unknown as Parameters<typeof makeWASocket>[0]["logger"],
-      }) as unknown as WASocketLike;
+        logger: logger.child({ module: "baileys", level: "silent" }) as unknown as Parameters<typeof makeWASocket>[0]["logger"],
+
+        // ── Connection stability settings ───────────────────────────────────
+        // Ping every 25s — WhatsApp drops silent connections after ~30s
+        keepAliveIntervalMs: 25_000,
+        // Give the initial handshake up to 60s before giving up
+        connectTimeoutMs: 60_000,
+        // Retry failed queries quickly
+        retryRequestDelayMs: 250,
+        // Don't advertise presence — reduces server-side timeouts for bots
+        markOnlineOnConnect: false,
+        // Don't request full message history — reduces initial load
+        syncFullHistory: false,
+        // Required by Baileys for message retry logic; return undefined = no cache
+        getMessage: async (_key: WAMessageKey) => undefined,
+      } as Parameters<typeof makeWASocket>[0]) as unknown as WASocketLike;
 
       this.sock = sock;
-
       sock.ev.on("creds.update", saveCreds);
 
-      // ── Connection lifecycle ────────────────────────────────────────────────
-      sock.ev.on(
-        "connection.update",
-        async (update: {
-          connection?: string;
-          lastDisconnect?: { error?: unknown };
-          qr?: string;
-        }) => {
-          const { connection, lastDisconnect, qr } = update;
+      // ── Connection lifecycle ──────────────────────────────────────────────
+      sock.ev.on("connection.update", async (update) => {
+        const { connection, lastDisconnect, qr } = update;
 
-          if (qr) {
-            try {
-              const QRCode = await import("qrcode");
-              this.qr = await QRCode.default.toDataURL(qr);
-              this.status = { ...this.status, status: "qr_ready" };
-              logger.info("QR code generated");
-            } catch {
-              this.qr = null;
-            }
-          }
-
-          if (connection === "close") {
-            const boom = lastDisconnect?.error as InstanceType<typeof Boom> | undefined;
-            const statusCode = boom?.output?.statusCode;
-
-            this.sock = null;
+        if (qr) {
+          try {
+            const QRCode = await import("qrcode");
+            this.qr = await QRCode.default.toDataURL(qr);
+            this.status = { ...this.status, status: "qr_ready" };
+            logger.info("QR code generated");
+          } catch {
             this.qr = null;
-            this.status = {
-              connected: false,
-              status: "disconnected",
-              phoneNumber: null,
-              displayName: null,
-            };
+          }
+        }
 
-            logger.info({ statusCode, intentionalLogout: this._intentionalLogout }, "Connection closed");
+        if (connection === "open") {
+          this.qr = null;
+          this._intentionalLogout = false;
+          this._connectedSince = Date.now();
+          this._reconnectAttempt = 0; // stable connection — reset backoff
 
-            // Don't reconnect if user intentionally logged out
-            if (this._intentionalLogout) {
-              logger.info("Intentional logout — not reconnecting");
-              return;
-            }
+          const user = sock.user;
+          this.status = {
+            connected: true,
+            status: "connected",
+            phoneNumber: user?.id?.split(":")[0] ?? null,
+            displayName: user?.name ?? null,
+          };
+          logger.info({ phoneNumber: this.status.phoneNumber }, "WhatsApp connected");
 
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+          // Full group sync once on connect, then events keep DB in sync
+          this._initialGroupSync().catch((e: unknown) =>
+            logger.error({ err: e }, "Initial group sync failed")
+          );
+        }
 
-            if (shouldReconnect) {
-              // Exponential backoff: 5s, 10s, 20s, 40s … capped at 5 minutes
-              const nextAttempt = attempt + 1;
-              const delayMs = Math.min(5000 * Math.pow(2, attempt), 300_000);
-              logger.info({ delayMs, nextAttempt }, "Reconnecting after delay");
-              setTimeout(() => {
-                this.initPromise = this._connect(nextAttempt);
-              }, delayMs);
-            } else {
-              // WhatsApp-side logout — wipe session so next init shows fresh QR
-              this.clearAuthFiles();
-              this.initPromise = null;
-              logger.info("Logged out from WhatsApp side — session cleared");
-            }
+        if (connection === "close") {
+          const boom = lastDisconnect?.error as InstanceType<typeof Boom> | undefined;
+          const statusCode = boom?.output?.statusCode;
+
+          // If last connection was stable (>30s), reset backoff for next attempt
+          if (this._connectedSince && Date.now() - this._connectedSince > 30_000) {
+            this._reconnectAttempt = 0;
+          }
+          this._connectedSince = null;
+
+          this.sock = null;
+          this.qr = null;
+          this.status = {
+            connected: false,
+            status: "disconnected",
+            phoneNumber: null,
+            displayName: null,
+          };
+
+          logger.info(
+            { statusCode, intentionalLogout: this._intentionalLogout },
+            "Connection closed"
+          );
+
+          if (this._intentionalLogout) {
+            logger.info("Intentional logout — not reconnecting");
+            return;
           }
 
-          if (connection === "open") {
-            this.qr = null;
-            this._intentionalLogout = false;
-            const user = sock.user;
-            this.status = {
-              connected: true,
-              status: "connected",
-              phoneNumber: user?.id?.split(":")[0] ?? null,
-              displayName: user?.name ?? null,
-            };
-            logger.info({ phoneNumber: this.status.phoneNumber }, "WhatsApp connected");
+          // ── Decide how to handle each disconnect reason ──────────────────
 
-            // Trigger a one-time full sync on connect so the DB starts fresh
-            this._initialGroupSync().catch((e: unknown) =>
-              logger.error({ err: e }, "Initial group sync failed")
-            );
+          if (statusCode === DisconnectReason.loggedOut) {
+            // User logged out from phone — clear session, show QR on next visit
+            logger.info("Logged out from WhatsApp — clearing session");
+            this.clearAuthFiles();
+            this.initPromise = null;
+            return;
           }
-        },
-      );
 
-      // ── Real-time group events ─────────────────────────────────────────────
+          if (statusCode === DisconnectReason.forbidden) {
+            // Account restricted/banned — do not hammer with reconnects
+            logger.warn("Connection forbidden (account may be restricted) — not reconnecting");
+            this.clearAuthFiles();
+            this.initPromise = null;
+            return;
+          }
 
-      // Fired when you join a new group, or on first connect with existing groups
+          if (statusCode === DisconnectReason.connectionReplaced) {
+            // Another WhatsApp Web session opened — the other session won, don't fight it
+            logger.warn("Connection replaced by another session — not reconnecting");
+            this.initPromise = null;
+            return;
+          }
+
+          if (statusCode === DisconnectReason.badSession) {
+            // Corrupted session files — wipe them and start fresh with QR
+            logger.warn("Bad session — clearing auth and resetting");
+            this.clearAuthFiles();
+            this.initPromise = null;
+            return;
+          }
+
+          // restartRequired → reconnect immediately (no delay)
+          // connectionLost / connectionClosed / timedOut / multideviceMismatch → backoff
+          const delayMs = statusCode === DisconnectReason.restartRequired
+            ? 0
+            : Math.min(3_000 * Math.pow(2, this._reconnectAttempt), 120_000);
+
+          this._reconnectAttempt++;
+
+          logger.info(
+            { delayMs, attempt: this._reconnectAttempt, statusCode },
+            "Reconnecting after disconnect"
+          );
+
+          setTimeout(() => {
+            this.initPromise = this._connect();
+          }, delayMs);
+        }
+      });
+
+      // ── Real-time group events ────────────────────────────────────────────
+
       sock.ev.on("groups.upsert", (groups) => {
-        if (groups.length === 0) return;
+        if (!groups.length) return;
         upsertGroups(groups)
           .then(() => logger.info({ count: groups.length }, "groups.upsert synced"))
           .catch((err: unknown) => logger.error({ err }, "groups.upsert DB error"));
       });
 
-      // Fired when a group's name or participant list changes
       sock.ev.on("groups.update", (updates) => {
-        const relevant = updates.filter((u) => u.subject !== undefined || u.participants !== undefined);
-        if (relevant.length === 0) return;
+        const relevant = updates.filter(
+          (u) => u.subject !== undefined || u.participants !== undefined
+        );
+        if (!relevant.length) return;
 
         Promise.all(
-          relevant.map(async (u) => {
-            await db
+          relevant.map((u) =>
+            db
               .update(groupsTable)
               .set({
                 ...(u.subject !== undefined ? { name: u.subject } : {}),
                 ...(u.participants !== undefined ? { memberCount: u.participants.length } : {}),
               })
-              .where(eq(groupsTable.groupId, u.id));
-          })
+              .where(eq(groupsTable.groupId, u.id))
+          )
         )
           .then(() => logger.info({ count: relevant.length }, "groups.update synced"))
           .catch((err: unknown) => logger.error({ err }, "groups.update DB error"));
       });
 
     } catch (err) {
-      logger.warn(
-        { err },
-        "Baileys not available or failed to initialize — WhatsApp features disabled",
-      );
+      logger.warn({ err }, "Baileys failed to initialize — WhatsApp features disabled");
       this.status = {
         connected: false,
         status: "unavailable",
@@ -259,8 +308,8 @@ class WhatsAppService {
   }
 
   /**
-   * Full sync run once on connect. Upserts all current groups and removes
-   * any stale DB rows that are no longer in WhatsApp.
+   * Full sync on first connect — upserts all current groups and cleans up
+   * stale DB rows. After this, real-time events keep everything in sync.
    */
   private async _initialGroupSync(): Promise<void> {
     const groups = await this.fetchGroups();
@@ -268,7 +317,6 @@ class WhatsAppService {
 
     await upsertGroups(groups);
 
-    // Remove DB rows for groups no longer in WhatsApp (WA-synced only, keep local- ones)
     const waIds = new Set(groups.map((g) => g.id));
     const existing = await db.select().from(groupsTable);
     const stale = existing.filter(
@@ -296,7 +344,6 @@ class WhatsAppService {
   }
 
   async logout(): Promise<void> {
-    // Set flag FIRST so connection.update handler doesn't auto-reconnect
     this._intentionalLogout = true;
     this.initPromise = null;
 
@@ -310,6 +357,8 @@ class WhatsAppService {
 
     this.sock = null;
     this.qr = null;
+    this._connectedSince = null;
+    this._reconnectAttempt = 0;
     this.status = {
       connected: false,
       status: "disconnected",
@@ -317,10 +366,8 @@ class WhatsAppService {
       displayName: null,
     };
 
-    // Wipe session files so old number can't reconnect
     this.clearAuthFiles();
-
-    logger.info("Logged out — session cleared. Call initialize() to connect a new number.");
+    logger.info("Logged out — session cleared.");
   }
 
   async fetchGroups(): Promise<GroupInfo[] | null> {
@@ -350,11 +397,6 @@ class WhatsAppService {
     await this.sock.groupParticipantsUpdate(groupId, [participantJid], "remove");
   }
 
-  /**
-   * Leaves a WhatsApp group (removes the bot from the group).
-   * Note: WhatsApp does not allow programmatic group deletion — this only
-   * removes the connected account from the group.
-   */
   async leaveGroup(groupId: string): Promise<void> {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");
