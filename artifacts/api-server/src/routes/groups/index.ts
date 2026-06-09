@@ -160,25 +160,43 @@ router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
     .from(contactsTable)
     .where(inArray(contactsTable.id, uniqueIds));
 
-  for (const contact of contacts) {
-    const [logEntry] = await db
-      .insert(groupLogsTable)
-      .values({ contactId: contact.id, groupId: group.id, status: "pending" })
-      .returning();
+  // Batch-insert all pending log entries up front
+  const logEntries = await db
+    .insert(groupLogsTable)
+    .values(contacts.map((c) => ({ contactId: c.id, groupId: group.id, status: "pending" })))
+    .returning();
 
-    try {
-      await whatsappService.addToGroup(group.groupId, toJid(contact.phone));
-      await db
-        .update(groupLogsTable)
-        .set({ status: "added" })
-        .where(eq(groupLogsTable.id, logEntry.id));
-    } catch (err) {
-      logger.error({ err, contactId: contact.id, groupId: group.id }, "Failed to add contact to group");
-      await db
-        .update(groupLogsTable)
-        .set({ status: "failed" })
-        .where(eq(groupLogsTable.id, logEntry.id));
-    }
+  // Map contactId → logEntry id for fast lookup
+  const logById = new Map(logEntries.map((l) => [l.contactId, l.id]));
+
+  // Run WhatsApp add calls in parallel (max 5 concurrent to avoid rate-limits)
+  const CONCURRENCY = 5;
+  const succeeded: number[] = [];
+  const failed: number[] = [];
+
+  for (let i = 0; i < contacts.length; i += CONCURRENCY) {
+    const batch = contacts.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(async (contact) => {
+        try {
+          await whatsappService.addToGroup(group.groupId, toJid(contact.phone));
+          const lid = logById.get(contact.id);
+          if (lid !== undefined) succeeded.push(lid);
+        } catch (err) {
+          logger.error({ err, contactId: contact.id, groupId: group.id }, "Failed to add contact to group");
+          const lid = logById.get(contact.id);
+          if (lid !== undefined) failed.push(lid);
+        }
+      })
+    );
+  }
+
+  // Batch-update log statuses
+  if (succeeded.length > 0) {
+    await db.update(groupLogsTable).set({ status: "added" }).where(inArray(groupLogsTable.id, succeeded));
+  }
+  if (failed.length > 0) {
+    await db.update(groupLogsTable).set({ status: "failed" }).where(inArray(groupLogsTable.id, failed));
   }
 
   res.json({ success: true, message: `Processing ${contacts.length} contacts` });

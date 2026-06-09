@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { eq, inArray } from "drizzle-orm";
 import { whatsappService } from "../../lib/whatsapp";
 import { db, groupsTable, groupLogsTable } from "@workspace/db";
 
@@ -65,30 +66,60 @@ router.post("/whatsapp/groups/sync", async (req, res): Promise<void> => {
     return;
   }
 
-  const groups = await whatsappService.fetchGroups();
-  if (groups === null) {
+  const waGroups = await whatsappService.fetchGroups();
+  if (waGroups === null) {
     res.status(500).json({ success: false, message: "Failed to fetch groups from WhatsApp. Try again." });
     return;
   }
 
-  // Clear existing groups and their logs, then re-insert all synced groups
-  await db.delete(groupLogsTable);
-  await db.delete(groupsTable);
+  // Upsert all WhatsApp groups — insert new, update changed name/memberCount
+  let added = 0;
+  let updated = 0;
+  if (waGroups.length > 0) {
+    const existing = await db.select().from(groupsTable);
+    const existingByGroupId = new Map(existing.map((g) => [g.groupId, g]));
 
-  if (groups.length > 0) {
-    await db.insert(groupsTable).values(
-      groups.map((g) => ({
-        groupId: g.id,
-        name: g.subject,
-        memberCount: g.participants?.length ?? null,
-      }))
-    );
+    const toInsert = waGroups.filter((g) => !existingByGroupId.has(g.id));
+    const toUpdate = waGroups.filter((g) => {
+      const db = existingByGroupId.get(g.id);
+      return db && (db.name !== g.subject || db.memberCount !== (g.participants?.length ?? null));
+    });
+
+    if (toInsert.length > 0) {
+      await db.insert(groupsTable).values(
+        toInsert.map((g) => ({
+          groupId: g.id,
+          name: g.subject,
+          memberCount: g.participants?.length ?? null,
+        }))
+      );
+      added = toInsert.length;
+    }
+
+    // Update changed groups one-by-one (small sets in practice)
+    for (const g of toUpdate) {
+      const row = existingByGroupId.get(g.id)!;
+      await db.update(groupsTable)
+        .set({ name: g.subject, memberCount: g.participants?.length ?? null })
+        .where(eq(groupsTable.id, row.id));
+    }
+    updated = toUpdate.length;
+
+    // Remove groups that have left WhatsApp (only WA-synced rows, not local- ones)
+    const waGroupIds = new Set(waGroups.map((g) => g.id));
+    const stale = existing.filter((g) => !g.groupId.startsWith("local-") && !waGroupIds.has(g.groupId));
+    if (stale.length > 0) {
+      const staleIds = stale.map((g) => g.id);
+      await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, staleIds));
+      await db.delete(groupsTable).where(inArray(groupsTable.id, staleIds));
+    }
   }
 
+  const total = waGroups.length;
   res.json({
     success: true,
-    message: groups.length > 0
-      ? `Synced ${groups.length} group${groups.length === 1 ? "" : "s"}`
+    message: total > 0
+      ? `Sync complete — ${added} added, ${updated} updated, ${total} total`
       : "No groups found. Make sure your WhatsApp number is in at least one group.",
   });
 });
