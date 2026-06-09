@@ -155,10 +155,20 @@ router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
   // Deduplicate incoming contactIds
   const uniqueIds = [...new Set(parsed.data.contactIds)];
 
+  if (uniqueIds.length === 0) {
+    res.status(400).json({ error: "No contacts selected" });
+    return;
+  }
+
   const contacts = await db
     .select()
     .from(contactsTable)
     .where(inArray(contactsTable.id, uniqueIds));
+
+  if (contacts.length === 0) {
+    res.status(404).json({ error: "None of the selected contacts were found" });
+    return;
+  }
 
   // Batch-insert all pending log entries up front
   const logEntries = await db
@@ -169,19 +179,34 @@ router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
   // Map contactId → logEntry id for fast lookup
   const logById = new Map(logEntries.map((l) => [l.contactId, l.id]));
 
-  // Run WhatsApp add calls in parallel (max 5 concurrent to avoid rate-limits)
-  const CONCURRENCY = 5;
+  // Run WhatsApp add calls sequentially with a short delay to avoid rate-limits.
+  // Concurrency of 5 caused bans on larger batches; 1-at-a-time is safer.
+  const CONCURRENCY = 2;
   const succeeded: number[] = [];
   const failed: number[] = [];
+
+  // WhatsApp status codes from groupParticipantsUpdate:
+  //   "200" = success
+  //   "403" = forbidden (not admin, or contact's privacy settings)
+  //   "408" = number not on WhatsApp
+  //   "409" = already in the group (treat as success)
+  const SUCCESS_CODES = new Set(["200", "409"]);
 
   for (let i = 0; i < contacts.length; i += CONCURRENCY) {
     const batch = contacts.slice(i, i + CONCURRENCY);
     await Promise.all(
       batch.map(async (contact) => {
         try {
-          await whatsappService.addToGroup(group.groupId, toJid(contact.phone));
+          const statusCode = await whatsappService.addToGroup(group.groupId, toJid(contact.phone));
           const lid = logById.get(contact.id);
-          if (lid !== undefined) succeeded.push(lid);
+          if (lid !== undefined) {
+            if (SUCCESS_CODES.has(statusCode)) {
+              succeeded.push(lid);
+            } else {
+              logger.warn({ statusCode, contactId: contact.id, groupId: group.id }, "WhatsApp rejected participant");
+              failed.push(lid);
+            }
+          }
         } catch (err) {
           logger.error({ err, contactId: contact.id, groupId: group.id }, "Failed to add contact to group");
           const lid = logById.get(contact.id);
@@ -189,6 +214,10 @@ router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
         }
       })
     );
+    // Brief pause between batches to avoid hitting WhatsApp rate limits
+    if (i + CONCURRENCY < contacts.length) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
 
   // Batch-update log statuses
@@ -199,7 +228,10 @@ router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
     await db.update(groupLogsTable).set({ status: "failed" }).where(inArray(groupLogsTable.id, failed));
   }
 
-  res.json({ success: true, message: `Processing ${contacts.length} contacts` });
+  res.json({
+    success: true,
+    message: `Added ${succeeded.length} contact${succeeded.length !== 1 ? "s" : ""}${failed.length > 0 ? `, ${failed.length} failed` : ""}`,
+  });
 });
 
 export default router;

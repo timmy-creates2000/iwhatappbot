@@ -48,7 +48,7 @@ interface WASocketLike {
   };
   logout(): Promise<void>;
   groupFetchAllParticipating(): Promise<Record<string, GroupInfo>>;
-  groupParticipantsUpdate(id: string, participants: string[], action: string): Promise<unknown>;
+  groupParticipantsUpdate(id: string, participants: string[], action: string): Promise<Array<{ status: string; jid: string }>>;
   groupLeave(groupId: string): Promise<unknown>;
   sendMessage(jid: string, content: { text: string }): Promise<unknown>;
 }
@@ -423,11 +423,21 @@ class WhatsAppService {
     }
   }
 
-  async addToGroup(groupId: string, participantJid: string): Promise<void> {
+  /**
+   * Adds a participant to a group. Returns the WhatsApp status code:
+   *   "200" = success
+   *   "403" = forbidden (bot is not admin, or privacy settings block it)
+   *   "408" = number not registered on WhatsApp
+   *   "409" = participant already in the group
+   * Throws only on network/connection errors.
+   */
+  async addToGroup(groupId: string, participantJid: string): Promise<string> {
     if (!this.sock || !this.status.connected) {
       throw new Error("Not connected to WhatsApp");
     }
-    await this.sock.groupParticipantsUpdate(groupId, [participantJid], "add");
+    const results = await this.sock.groupParticipantsUpdate(groupId, [participantJid], "add");
+    // results is an array — one entry per participant
+    return results[0]?.status ?? "200";
   }
 
   async removeFromGroup(groupId: string, participantJid: string): Promise<void> {
