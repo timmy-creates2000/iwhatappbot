@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { useGetWhatsAppStatus, useGetWhatsAppQR, useLogoutWhatsApp } from "@workspace/api-client-react";
+import { useGetWhatsAppStatus, useGetWhatsAppQR, useLogoutWhatsApp, getGetWhatsAppStatusQueryKey, getGetWhatsAppQRQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ export default function ConnectPage() {
 
   // WhatsApp status — always public, no password needed
   const { data: statusData, isLoading: isLoadingStatus } = useGetWhatsAppStatus({
-    query: { refetchInterval: 3000 },
+    query: { queryKey: getGetWhatsAppStatusQueryKey(), refetchInterval: 3000 },
   });
   const isConnected = statusData?.connected;
 
@@ -32,6 +32,7 @@ export default function ConnectPage() {
   // Poll every 2 s so we pick up the QR as soon as Baileys generates it
   const { data: qrData, isLoading: isLoadingQR, error: qrError } = useGetWhatsAppQR({
     query: {
+      queryKey: getGetWhatsAppQRQueryKey(),
       enabled: !!authedPassword && !isConnected,
       refetchInterval: 2000,
       retry: false,

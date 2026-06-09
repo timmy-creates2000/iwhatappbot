@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListGroups,
@@ -7,6 +7,8 @@ import {
   useDeleteGroup,
   useAddContactsToGroup,
   useSyncWhatsAppGroups,
+  useGetGroupSyncStatus,
+  getGetGroupSyncStatusQueryKey,
   useListContacts,
   getListGroupsQueryKey,
 } from "@workspace/api-client-react";
@@ -54,6 +56,33 @@ export default function Groups() {
   const syncGroups = useSyncWhatsAppGroups();
   const addContact = useAddContactsToGroup();
   const { toast } = useToast();
+
+  // Poll sync status while a sync is running
+  const [polling, setPolling] = useState(false);
+  const prevStatus = useRef<string | undefined>(undefined);
+  const { data: syncStatus } = useGetGroupSyncStatus({
+    query: { queryKey: getGetGroupSyncStatusQueryKey(), refetchInterval: polling ? 2000 : false, enabled: polling },
+  });
+
+  useEffect(() => {
+    if (!syncStatus) return;
+    if (syncStatus.status === "idle" && prevStatus.current === "syncing") {
+      setPolling(false);
+      void queryClient.invalidateQueries({ queryKey: getListGroupsQueryKey() });
+      if (syncStatus.error) {
+        toast({ title: syncStatus.error, variant: "destructive" });
+      } else if (syncStatus.lastSync) {
+        const { added, updated, removed, total } = syncStatus.lastSync;
+        const parts: string[] = [];
+        if (added > 0) parts.push(`${added} added`);
+        if (updated > 0) parts.push(`${updated} updated`);
+        if (removed > 0) parts.push(`${removed} removed`);
+        const detail = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+        toast({ title: `Synced ${total} group${total !== 1 ? "s" : ""}${detail}` });
+      }
+    }
+    prevStatus.current = syncStatus.status;
+  }, [syncStatus, queryClient, toast]);
 
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
@@ -164,10 +193,9 @@ export default function Groups() {
 
   function handleSync() {
     syncGroups.mutate(undefined, {
-      onSuccess: (data) => {
-        // Invalidate groups list so the UI refreshes immediately with synced data
-        void queryClient.invalidateQueries({ queryKey: getListGroupsQueryKey() });
-        toast({ title: data.message ?? "Groups synced from WhatsApp" });
+      onSuccess: () => {
+        prevStatus.current = "syncing";
+        setPolling(true);
       },
       onError: (err) => {
         const msg = (err as { data?: { message?: string } }).data?.message
@@ -185,9 +213,9 @@ export default function Groups() {
           <p className="text-muted-foreground mt-1">Manage your WhatsApp groups.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleSync} disabled={syncGroups.isPending}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${syncGroups.isPending ? "animate-spin" : ""}`} />
-            Sync from WhatsApp
+          <Button variant="outline" onClick={handleSync} disabled={syncGroups.isPending || polling}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${(syncGroups.isPending || polling) ? "animate-spin" : ""}`} />
+            {polling ? "Syncing…" : "Sync from WhatsApp"}
           </Button>
           <Button onClick={openAdd}>
             <Plus className="w-4 h-4 mr-2" />

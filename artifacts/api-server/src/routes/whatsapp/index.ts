@@ -2,8 +2,88 @@ import { Router, type IRouter } from "express";
 import { eq, inArray } from "drizzle-orm";
 import { whatsappService } from "../../lib/whatsapp";
 import { db, groupsTable, groupLogsTable } from "@workspace/db";
+import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
+
+// ── In-memory sync state ──────────────────────────────────────────────────────
+interface SyncResult {
+  added: number;
+  updated: number;
+  removed: number;
+  total: number;
+  completedAt: string;
+}
+
+interface SyncState {
+  status: "idle" | "syncing";
+  lastSync: SyncResult | null;
+  error: string | null;
+}
+
+const syncState: SyncState = { status: "idle", lastSync: null, error: null };
+
+async function runGroupSync(): Promise<void> {
+  const waGroups = await whatsappService.fetchGroups();
+  if (waGroups === null) {
+    throw new Error("Failed to fetch groups from WhatsApp");
+  }
+
+  let added = 0;
+  let updated = 0;
+  let removed = 0;
+
+  if (waGroups.length > 0) {
+    const existing = await db.select().from(groupsTable);
+    const existingByGroupId = new Map(existing.map((g) => [g.groupId, g]));
+
+    const toInsert = waGroups.filter((g) => !existingByGroupId.has(g.id));
+    const toUpdate = waGroups.filter((g) => {
+      const row = existingByGroupId.get(g.id);
+      return row && (row.name !== g.subject || row.memberCount !== (g.participants?.length ?? null));
+    });
+
+    if (toInsert.length > 0) {
+      await db.insert(groupsTable).values(
+        toInsert.map((g) => ({
+          groupId: g.id,
+          name: g.subject,
+          memberCount: g.participants?.length ?? null,
+        }))
+      );
+      added = toInsert.length;
+    }
+
+    for (const g of toUpdate) {
+      const row = existingByGroupId.get(g.id)!;
+      await db
+        .update(groupsTable)
+        .set({ name: g.subject, memberCount: g.participants?.length ?? null })
+        .where(eq(groupsTable.id, row.id));
+    }
+    updated = toUpdate.length;
+
+    // Remove stale WA-synced groups no longer in WhatsApp
+    const waGroupIds = new Set(waGroups.map((g) => g.id));
+    const stale = existing.filter(
+      (g) => !g.groupId.startsWith("local-") && !waGroupIds.has(g.groupId)
+    );
+    if (stale.length > 0) {
+      const staleIds = stale.map((g) => g.id);
+      await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, staleIds));
+      await db.delete(groupsTable).where(inArray(groupsTable.id, staleIds));
+      removed = stale.length;
+    }
+  }
+
+  syncState.lastSync = {
+    added,
+    updated,
+    removed,
+    total: waGroups.length,
+    completedAt: new Date().toISOString(),
+  };
+}
 
 // Protected — only the owner can see the QR code
 router.get("/whatsapp/qr", async (req, res): Promise<void> => {
@@ -30,12 +110,12 @@ router.post("/whatsapp/qr/refresh", async (req, res): Promise<void> => {
       res.status(409).json({ error: "Already connected. Call /whatsapp/logout first to generate a new QR code." });
       return;
     }
-    
+
     await whatsappService.refreshQR();
-    
+
     // Give it a moment to generate new QR
     await new Promise(resolve => setTimeout(resolve, 500));
-    
+
     const newQr = whatsappService.getQR();
     const newStatus = whatsappService.getStatus();
     res.json({ qr: newQr, status: newStatus.status, message: "New QR code generated. Please scan it quickly as it expires in 60 seconds." });
@@ -59,69 +139,39 @@ router.post("/whatsapp/logout", async (req, res): Promise<void> => {
   res.json({ success: true, message: "Logged out successfully" });
 });
 
-// Protected — triggers live WhatsApp call, syncs ALL groups the number participates in
-router.post("/whatsapp/groups/sync", async (req, res): Promise<void> => {
+// Protected — kicks off a background sync, returns immediately
+router.post("/whatsapp/groups/sync", (req, res): void => {
   if (!whatsappService.getStatus().connected) {
     res.status(400).json({ success: false, message: "Not connected to WhatsApp. Scan QR first." });
     return;
   }
 
-  const waGroups = await whatsappService.fetchGroups();
-  if (waGroups === null) {
-    res.status(500).json({ success: false, message: "Failed to fetch groups from WhatsApp. Try again." });
+  if (syncState.status === "syncing") {
+    res.status(202).json({ success: true, message: "Sync already in progress" });
     return;
   }
 
-  // Upsert all WhatsApp groups — insert new, update changed name/memberCount
-  let added = 0;
-  let updated = 0;
-  if (waGroups.length > 0) {
-    const existing = await db.select().from(groupsTable);
-    const existingByGroupId = new Map(existing.map((g) => [g.groupId, g]));
+  syncState.status = "syncing";
+  syncState.error = null;
 
-    const toInsert = waGroups.filter((g) => !existingByGroupId.has(g.id));
-    const toUpdate = waGroups.filter((g) => {
-      const db = existingByGroupId.get(g.id);
-      return db && (db.name !== g.subject || db.memberCount !== (g.participants?.length ?? null));
+  // Fire and forget — client polls /sync/status
+  runGroupSync()
+    .then(() => {
+      syncState.status = "idle";
+      logger.info({ result: syncState.lastSync }, "Group sync completed");
+    })
+    .catch((err: unknown) => {
+      syncState.status = "idle";
+      syncState.error = err instanceof Error ? err.message : "Unknown error";
+      logger.error({ err }, "Group sync failed");
     });
 
-    if (toInsert.length > 0) {
-      await db.insert(groupsTable).values(
-        toInsert.map((g) => ({
-          groupId: g.id,
-          name: g.subject,
-          memberCount: g.participants?.length ?? null,
-        }))
-      );
-      added = toInsert.length;
-    }
+  res.status(202).json({ success: true, message: "Sync started" });
+});
 
-    // Update changed groups one-by-one (small sets in practice)
-    for (const g of toUpdate) {
-      const row = existingByGroupId.get(g.id)!;
-      await db.update(groupsTable)
-        .set({ name: g.subject, memberCount: g.participants?.length ?? null })
-        .where(eq(groupsTable.id, row.id));
-    }
-    updated = toUpdate.length;
-
-    // Remove groups that have left WhatsApp (only WA-synced rows, not local- ones)
-    const waGroupIds = new Set(waGroups.map((g) => g.id));
-    const stale = existing.filter((g) => !g.groupId.startsWith("local-") && !waGroupIds.has(g.groupId));
-    if (stale.length > 0) {
-      const staleIds = stale.map((g) => g.id);
-      await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, staleIds));
-      await db.delete(groupsTable).where(inArray(groupsTable.id, staleIds));
-    }
-  }
-
-  const total = waGroups.length;
-  res.json({
-    success: true,
-    message: total > 0
-      ? `Sync complete — ${added} added, ${updated} updated, ${total} total`
-      : "No groups found. Make sure your WhatsApp number is in at least one group.",
-  });
+// Returns current sync state — frontend polls this until status === "idle"
+router.get("/whatsapp/groups/sync/status", (req, res): void => {
+  res.json(syncState);
 });
 
 export default router;

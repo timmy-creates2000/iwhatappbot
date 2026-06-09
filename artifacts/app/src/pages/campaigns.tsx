@@ -77,7 +77,7 @@ type FormState = {
 export default function Campaigns() {
   const queryClient = useQueryClient();
   const { data: campaigns, isLoading } = useListCampaigns({
-    query: { refetchInterval: 5000 }, // auto-refresh every 5s to show live progress
+    query: { queryKey: getListCampaignsQueryKey(), refetchInterval: 5000 }, // auto-refresh every 5s to show live progress
   });
   const { data: contacts } = useListContacts();
   const createCampaign = useCreateCampaign();

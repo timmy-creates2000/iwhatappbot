@@ -85,14 +85,27 @@ paths:
     post:
       operationId: syncWhatsAppGroups
       tags: [whatsapp]
-      summary: Sync groups from WhatsApp
+      summary: Start background sync of groups from WhatsApp
       responses:
-        "200":
-          description: Groups synced
+        "202":
+          description: Sync started
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
+
+  /whatsapp/groups/sync/status:
+    get:
+      operationId: getGroupSyncStatus
+      tags: [whatsapp]
+      summary: Get the status of the current or last group sync
+      responses:
+        "200":
+          description: Sync status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupSyncStatus"
 
   # Contacts
   /contacts:
@@ -660,6 +673,38 @@ components:
       required:
         - success
 
+    GroupSyncStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [idle, syncing]
+        lastSync:
+          type: object
+          nullable: true
+          properties:
+            added:
+              type: integer
+            updated:
+              type: integer
+            removed:
+              type: integer
+            total:
+              type: integer
+            completedAt:
+              type: string
+              format: date-time
+          required:
+            - added
+            - updated
+            - removed
+            - total
+            - completedAt
+        error:
+          type: ["string", "null"]
+      required:
+        - status
+
     ErrorResponse:
       type: object
       properties:
@@ -880,6 +925,9 @@ components:
           type: array
           items:
             type: integer
+        delayBetweenMessages:
+          type: integer
+          description: Delay in milliseconds between messages (default 3000)
       required:
         - name
         - messageTemplate

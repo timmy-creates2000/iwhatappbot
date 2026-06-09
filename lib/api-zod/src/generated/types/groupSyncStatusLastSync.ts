@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface ComposeMessageInput {
-  topic: string;
-  /** @nullable */
-  tone?: string | null;
-  /** @nullable */
-  purpose?: string | null;
-}
+export type GroupSyncStatusLastSync = {
+  added: number;
+  updated: number;
+  removed: number;
+  total: number;
+  completedAt: Date;
+} | null;
