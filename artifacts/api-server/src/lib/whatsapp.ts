@@ -312,24 +312,46 @@ class WhatsAppService {
    * stale DB rows. After this, real-time events keep everything in sync.
    */
   private async _initialGroupSync(): Promise<void> {
-    const groups = await this.fetchGroups();
+    // Wait for Baileys to fully settle after the connection opens before
+    // fetching groups — calling groupFetchAllParticipating too soon can
+    // return an empty result even when the user has many groups.
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+    // Retry up to 3 times in case the first fetch returns an empty list
+    // (race condition during Baileys initialisation).
+    let groups: GroupInfo[] | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      groups = await this.fetchGroups();
+      if (groups && groups.length > 0) break;
+      if (attempt < 3) {
+        logger.warn({ attempt }, "Group fetch returned empty — retrying in 5s");
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+      }
+    }
+
     if (!groups) return;
 
     await upsertGroups(groups);
 
-    const waIds = new Set(groups.map((g) => g.id));
-    const existing = await db.select().from(groupsTable);
-    const stale = existing.filter(
-      (r) => !r.groupId.startsWith("local-") && !waIds.has(r.groupId)
-    );
-    if (stale.length > 0) {
-      const staleIds = stale.map((r) => r.id);
-      await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, staleIds));
-      await db.delete(groupsTable).where(inArray(groupsTable.id, staleIds));
+    // Only prune stale rows when we got a non-empty list back from WhatsApp.
+    // If the fetch returned 0 groups (e.g. all retries timed out), skip
+    // deletion entirely so we don't accidentally wipe the DB.
+    if (groups.length > 0) {
+      const waIds = new Set(groups.map((g) => g.id));
+      const existing = await db.select().from(groupsTable);
+      const stale = existing.filter(
+        (r) => !r.groupId.startsWith("local-") && !waIds.has(r.groupId)
+      );
+      if (stale.length > 0) {
+        const staleIds = stale.map((r) => r.id);
+        await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, staleIds));
+        await db.delete(groupsTable).where(inArray(groupsTable.id, staleIds));
+        logger.info({ removed: stale.length }, "Removed stale groups from DB");
+      }
     }
 
     logger.info(
-      { total: groups.length, removed: stale.length },
+      { total: groups.length },
       "Initial group sync complete"
     );
   }
