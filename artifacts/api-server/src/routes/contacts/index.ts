@@ -14,6 +14,52 @@ import {
 
 const router: IRouter = Router();
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Parse one CSV line respecting double-quoted fields and tab separators. */
+function parseFields(line: string): string[] {
+  // Tab-separated: split on tabs, strip optional surrounding quotes
+  if (line.includes("\t")) {
+    return line.split("\t").map((f) => f.trim().replace(/^"|"$/g, ""));
+  }
+
+  // Comma-separated with RFC 4180 quote support
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      // Escaped quote inside a quoted field ("" → ")
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      fields.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
+const HEADER_KEYWORDS = ["name", "phone", "mobile", "contact", "number", "tel", "email"];
+
+function isHeaderRow(fields: string[]): boolean {
+  if (!fields.length) return false;
+  return fields.every((f) =>
+    HEADER_KEYWORDS.some((k) => f.toLowerCase().includes(k))
+  );
+}
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+
 router.get("/contacts", async (req, res): Promise<void> => {
   const parsed = ListContactsQueryParams.safeParse(req.query);
   const search = parsed.success ? parsed.data.search : undefined;
@@ -47,34 +93,54 @@ router.post("/contacts/bulk", async (req, res): Promise<void> => {
     return;
   }
 
-  const lines = parsed.data.text
-    .split("\n")
+  // Strip UTF-8 BOM if present (Excel often adds this)
+  const rawText = parsed.data.text.replace(/^\uFEFF/, "");
+
+  const lines = rawText
+    .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
+
+  if (!lines.length) {
+    res.json({ imported: 0, skipped: 0, errors: ["File is empty"] });
+    return;
+  }
+
+  // Detect and skip header row
+  const firstFields = parseFields(lines[0]);
+  const dataLines = isHeaderRow(firstFields) ? lines.slice(1) : lines;
 
   const errors: string[] = [];
   const validRows: { name: string; phone: string }[] = [];
 
-  for (const line of lines) {
-    const parts = line.split(",").map((p) => p.trim());
-    if (parts.length < 2) {
-      errors.push(`Invalid line: "${line}"`);
+  for (const line of dataLines) {
+    const parts = parseFields(line);
+
+    // Phone-only line (e.g. from a .txt export): use phone as name
+    if (parts.length === 1) {
+      const val = parts[0].replace(/^"|"$/g, "");
+      if (/^\+?[\d\s\-().]{6,}$/.test(val)) {
+        validRows.push({ name: val, phone: val });
+        continue;
+      }
+      errors.push(`Cannot parse line: "${line}"`);
       continue;
     }
-    const [name, phone] = parts;
+
+    const [name, phone] = [parts[0].replace(/^"|"$/g, ""), parts[1].replace(/^"|"$/g, "")];
     if (!name || !phone) {
       errors.push(`Missing name or phone: "${line}"`);
       continue;
     }
+
     validRows.push({ name, phone });
   }
 
   if (!validRows.length) {
-    res.json({ imported: 0, skipped: 0, errors });
+    res.json({ imported: 0, skipped: errors.length, errors });
     return;
   }
 
-  // Batch insert — all rows in a single statement, skip duplicates by phone
   await db
     .insert(contactsTable)
     .values(validRows)
