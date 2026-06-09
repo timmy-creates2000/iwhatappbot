@@ -2,6 +2,8 @@ import { logger } from "./logger";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { eq, inArray } from "drizzle-orm";
+import { db, groupsTable, groupLogsTable } from "@workspace/db";
 
 // Resolve .wa-auth relative to the workspace root, not cwd
 // In dev (tsx): __dirname = src/, workspace root = ../../
@@ -16,10 +18,16 @@ interface WhatsAppStatusData {
   displayName: string | null;
 }
 
-interface GroupInfo {
+export interface GroupInfo {
   id: string;
   subject: string;
   participants: Array<{ id: string; admin?: string | null }>;
+}
+
+interface GroupUpdate {
+  id: string;
+  subject?: string;
+  participants?: Array<{ id: string; admin?: string | null }>;
 }
 
 /** Minimal typed interface for the Baileys WASocket we actually use */
@@ -32,6 +40,8 @@ interface WASocketLike {
       lastDisconnect?: { error?: unknown };
       qr?: string;
     }) => void): void;
+    on(event: "groups.upsert", handler: (groups: GroupInfo[]) => void): void;
+    on(event: "groups.update", handler: (updates: GroupUpdate[]) => void): void;
   };
   logout(): Promise<void>;
   groupFetchAllParticipating(): Promise<Record<string, GroupInfo>>;
@@ -44,6 +54,27 @@ interface WASocketLike {
 export function toJid(phone: string): string {
   const digits = phone.startsWith("+") ? phone.slice(1) : phone;
   return `${digits}@s.whatsapp.net`;
+}
+
+// ── Group upsert helper (shared by event handler + manual sync) ───────────────
+
+async function upsertGroups(groups: GroupInfo[]): Promise<void> {
+  for (const g of groups) {
+    await db
+      .insert(groupsTable)
+      .values({
+        groupId: g.id,
+        name: g.subject,
+        memberCount: g.participants?.length ?? null,
+      })
+      .onConflictDoUpdate({
+        target: groupsTable.groupId,
+        set: {
+          name: g.subject,
+          memberCount: g.participants?.length ?? null,
+        },
+      });
+  }
 }
 
 class WhatsAppService {
@@ -103,6 +134,7 @@ class WhatsAppService {
 
       sock.ev.on("creds.update", saveCreds);
 
+      // ── Connection lifecycle ────────────────────────────────────────────────
       sock.ev.on(
         "connection.update",
         async (update: {
@@ -173,9 +205,45 @@ class WhatsAppService {
               displayName: user?.name ?? null,
             };
             logger.info({ phoneNumber: this.status.phoneNumber }, "WhatsApp connected");
+
+            // Trigger a one-time full sync on connect so the DB starts fresh
+            this._initialGroupSync().catch((e: unknown) =>
+              logger.error({ err: e }, "Initial group sync failed")
+            );
           }
         },
       );
+
+      // ── Real-time group events ─────────────────────────────────────────────
+
+      // Fired when you join a new group, or on first connect with existing groups
+      sock.ev.on("groups.upsert", (groups) => {
+        if (groups.length === 0) return;
+        upsertGroups(groups)
+          .then(() => logger.info({ count: groups.length }, "groups.upsert synced"))
+          .catch((err: unknown) => logger.error({ err }, "groups.upsert DB error"));
+      });
+
+      // Fired when a group's name or participant list changes
+      sock.ev.on("groups.update", (updates) => {
+        const relevant = updates.filter((u) => u.subject !== undefined || u.participants !== undefined);
+        if (relevant.length === 0) return;
+
+        Promise.all(
+          relevant.map(async (u) => {
+            await db
+              .update(groupsTable)
+              .set({
+                ...(u.subject !== undefined ? { name: u.subject } : {}),
+                ...(u.participants !== undefined ? { memberCount: u.participants.length } : {}),
+              })
+              .where(eq(groupsTable.groupId, u.id));
+          })
+        )
+          .then(() => logger.info({ count: relevant.length }, "groups.update synced"))
+          .catch((err: unknown) => logger.error({ err }, "groups.update DB error"));
+      });
+
     } catch (err) {
       logger.warn(
         { err },
@@ -188,6 +256,34 @@ class WhatsAppService {
         displayName: null,
       };
     }
+  }
+
+  /**
+   * Full sync run once on connect. Upserts all current groups and removes
+   * any stale DB rows that are no longer in WhatsApp.
+   */
+  private async _initialGroupSync(): Promise<void> {
+    const groups = await this.fetchGroups();
+    if (!groups) return;
+
+    await upsertGroups(groups);
+
+    // Remove DB rows for groups no longer in WhatsApp (WA-synced only, keep local- ones)
+    const waIds = new Set(groups.map((g) => g.id));
+    const existing = await db.select().from(groupsTable);
+    const stale = existing.filter(
+      (r) => !r.groupId.startsWith("local-") && !waIds.has(r.groupId)
+    );
+    if (stale.length > 0) {
+      const staleIds = stale.map((r) => r.id);
+      await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, staleIds));
+      await db.delete(groupsTable).where(inArray(groupsTable.id, staleIds));
+    }
+
+    logger.info(
+      { total: groups.length, removed: stale.length },
+      "Initial group sync complete"
+    );
   }
 
   private clearAuthFiles(): void {
