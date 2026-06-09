@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { whatsappService } from "../../lib/whatsapp";
-import { db, groupsTable, groupLogsTable } from "@workspace/db";
+import { db, groupsTable } from "@workspace/db";
 import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
@@ -24,14 +24,16 @@ interface SyncState {
 const syncState: SyncState = { status: "idle", lastSync: null, error: null };
 
 async function runGroupSync(): Promise<void> {
-  const waGroups = await whatsappService.fetchGroups();
+  // fetchAllGroups() uses the in-memory cache built from groups.upsert events —
+  // no 50-group cap. groupFetchAllParticipating() is hard-capped by WhatsApp's
+  // protocol so we never use it for sync decisions.
+  const waGroups = await whatsappService.fetchAllGroups();
   if (waGroups === null) {
     throw new Error("Failed to fetch groups from WhatsApp");
   }
 
   let added = 0;
   let updated = 0;
-  let removed = 0;
 
   if (waGroups.length > 0) {
     const existing = await db.select().from(groupsTable);
@@ -63,23 +65,17 @@ async function runGroupSync(): Promise<void> {
     }
     updated = toUpdate.length;
 
-    // Remove stale WA-synced groups no longer in WhatsApp
-    const waGroupIds = new Set(waGroups.map((g) => g.id));
-    const stale = existing.filter(
-      (g) => !g.groupId.startsWith("local-") && !waGroupIds.has(g.groupId)
-    );
-    if (stale.length > 0) {
-      const staleIds = stale.map((g) => g.id);
-      await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, staleIds));
-      await db.delete(groupsTable).where(inArray(groupsTable.id, staleIds));
-      removed = stale.length;
-    }
+    // NOTE: We intentionally do NOT delete "stale" groups here.
+    // groupFetchAllParticipating() is capped at ~50 by WhatsApp's protocol,
+    // so any deletion based on what the API returns would wrongly remove
+    // groups beyond that cap. Groups the user has left will stop receiving
+    // real-time events and can be removed manually from the UI.
   }
 
   syncState.lastSync = {
     added,
     updated,
-    removed,
+    removed: 0,
     total: waGroups.length,
     completedAt: new Date().toISOString(),
   };

@@ -98,6 +98,11 @@ class WhatsAppService {
   private _reconnectAttempt = 0;
   private _connectedSince: number | null = null;
 
+  // Accumulated from groups.upsert events — covers ALL groups (no 50-cap).
+  // groupFetchAllParticipating() is capped at ~50 by WhatsApp's protocol, so
+  // we rely on these events for a complete picture.
+  private _groupCache = new Map<string, GroupInfo>();
+
   getStatus(): WhatsAppStatusData {
     return this.status;
   }
@@ -270,8 +275,14 @@ class WhatsAppService {
 
       sock.ev.on("groups.upsert", (groups) => {
         if (!groups.length) return;
+        // Populate cache — covers all groups including those beyond the 50-cap
+        // of groupFetchAllParticipating. WhatsApp streams every group the user
+        // belongs to through this event during the initial connection handshake.
+        for (const g of groups) {
+          this._groupCache.set(g.id, g);
+        }
         upsertGroups(groups)
-          .then(() => logger.info({ count: groups.length }, "groups.upsert synced"))
+          .then(() => logger.info({ count: groups.length, cacheSize: this._groupCache.size }, "groups.upsert synced"))
           .catch((err: unknown) => logger.error({ err }, "groups.upsert DB error"));
       });
 
@@ -308,52 +319,38 @@ class WhatsAppService {
   }
 
   /**
-   * Full sync on first connect — upserts all current groups and cleans up
-   * stale DB rows. After this, real-time events keep everything in sync.
+   * Full sync on first connect — waits for WhatsApp to stream all groups via
+   * groups.upsert events (which have no cap), then upserts the full cache to DB.
+   *
+   * We intentionally do NOT delete stale rows here because
+   * groupFetchAllParticipating() is hard-capped at ~50 groups by WhatsApp's
+   * protocol — using it for deletion would wrongly remove groups 51+.
+   * The groups.upsert event stream covers every group, so the DB naturally
+   * stays in sync as real-time events arrive.
    */
   private async _initialGroupSync(): Promise<void> {
-    // Wait for Baileys to fully settle after the connection opens before
-    // fetching groups — calling groupFetchAllParticipating too soon can
-    // return an empty result even when the user has many groups.
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    // Give Baileys time to receive the full groups.upsert stream from WhatsApp.
+    // The stream is usually complete within a few seconds but we wait 15s to be
+    // safe for accounts with many groups.
+    await new Promise((resolve) => setTimeout(resolve, 15_000));
 
-    // Retry up to 3 times in case the first fetch returns an empty list
-    // (race condition during Baileys initialisation).
-    let groups: GroupInfo[] | null = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      groups = await this.fetchGroups();
-      if (groups && groups.length > 0) break;
-      if (attempt < 3) {
-        logger.warn({ attempt }, "Group fetch returned empty — retrying in 5s");
-        await new Promise((resolve) => setTimeout(resolve, 5_000));
+    const cached = Array.from(this._groupCache.values());
+
+    if (cached.length === 0) {
+      // Cache is empty — fall back to the direct API call as a best-effort.
+      // This will only return up to ~50 groups but is better than nothing.
+      const fetched = await this.fetchGroups();
+      if (fetched && fetched.length > 0) {
+        await upsertGroups(fetched);
+        logger.info({ total: fetched.length }, "Initial group sync complete (API fallback)");
+      } else {
+        logger.warn("Initial group sync skipped — no groups received from WhatsApp");
       }
+      return;
     }
 
-    if (!groups) return;
-
-    await upsertGroups(groups);
-
-    // Only prune stale rows when we got a non-empty list back from WhatsApp.
-    // If the fetch returned 0 groups (e.g. all retries timed out), skip
-    // deletion entirely so we don't accidentally wipe the DB.
-    if (groups.length > 0) {
-      const waIds = new Set(groups.map((g) => g.id));
-      const existing = await db.select().from(groupsTable);
-      const stale = existing.filter(
-        (r) => !r.groupId.startsWith("local-") && !waIds.has(r.groupId)
-      );
-      if (stale.length > 0) {
-        const staleIds = stale.map((r) => r.id);
-        await db.delete(groupLogsTable).where(inArray(groupLogsTable.groupId, staleIds));
-        await db.delete(groupsTable).where(inArray(groupsTable.id, staleIds));
-        logger.info({ removed: stale.length }, "Removed stale groups from DB");
-      }
-    }
-
-    logger.info(
-      { total: groups.length },
-      "Initial group sync complete"
-    );
+    await upsertGroups(cached);
+    logger.info({ total: cached.length }, "Initial group sync complete");
   }
 
   private clearAuthFiles(): void {
@@ -381,6 +378,7 @@ class WhatsAppService {
     this.qr = null;
     this._connectedSince = null;
     this._reconnectAttempt = 0;
+    this._groupCache.clear();
     this.status = {
       connected: false,
       status: "disconnected",
@@ -392,12 +390,32 @@ class WhatsAppService {
     logger.info("Logged out — session cleared.");
   }
 
+  /**
+   * Returns all groups from the in-memory cache (populated via groups.upsert
+   * events — no 50-group cap). Falls back to groupFetchAllParticipating() if
+   * the cache is empty. Returns null when not connected.
+   */
+  async fetchAllGroups(): Promise<GroupInfo[] | null> {
+    if (!this.sock || !this.status.connected) return null;
+    if (this._groupCache.size > 0) {
+      const cached = Array.from(this._groupCache.values());
+      logger.info({ total: cached.length }, "Returning groups from cache");
+      return cached;
+    }
+    // Cache empty — fall back to direct API (capped at ~50 by WhatsApp)
+    return this.fetchGroups();
+  }
+
+  /**
+   * Direct API call — hard-capped at ~50 groups by WhatsApp's protocol.
+   * Prefer fetchAllGroups() which uses the uncapped event cache.
+   */
   async fetchGroups(): Promise<GroupInfo[] | null> {
     if (!this.sock || !this.status.connected) return null;
     try {
       const groups = await this.sock.groupFetchAllParticipating();
       const allGroups = Object.values(groups);
-      logger.info({ total: allGroups.length }, "Fetched all participating groups");
+      logger.info({ total: allGroups.length }, "Fetched groups via API (capped at ~50)");
       return allGroups;
     } catch (err) {
       logger.error({ err }, "Failed to fetch groups");
