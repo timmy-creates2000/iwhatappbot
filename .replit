@@ -33,7 +33,7 @@ waitForPort = 3000
 outputType = "webview"
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
 
 [postMerge]
@@ -72,6 +72,7 @@ BASE_PATH = "/"
 LOG_LEVEL = "info"
 NODE_ENV = "development"
 ALLOWED_ORIGIN = ""
+PORT = "8080"
 
 [nix]
 channel = "stable-25_05"
