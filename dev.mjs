@@ -45,15 +45,15 @@ run(
   "pnpm --filter @workspace/api-server run dev"
 );
 
-// Start frontend (port 3000)
+// Start frontend (port 5000)
 run(
   "app",
   "36", // cyan
   "pnpm --filter @workspace/app run dev",
-  { PORT: "3000", BASE_PATH: "/" }
+  { PORT: "5000", BASE_PATH: "/" }
 );
 
-console.log("\x1b[33m[dev]\x1b[0m Starting api on :8080 and app on :3000 ...\n");
+console.log("\x1b[33m[dev]\x1b[0m Starting api on :8080 and app on :5000 ...\n");
 
 // Keep process alive
 process.on("SIGINT", () => process.exit(0));
