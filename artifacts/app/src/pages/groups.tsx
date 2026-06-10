@@ -57,12 +57,18 @@ export default function Groups() {
   const addContact = useAddContactsToGroup();
   const { toast } = useToast();
 
-  // Poll sync status while a sync is running
+  // Always poll sync status: fast while syncing, slow otherwise (for cacheSize)
   const [polling, setPolling] = useState(false);
   const prevStatus = useRef<string | undefined>(undefined);
   const { data: syncStatus } = useGetGroupSyncStatus({
-    query: { queryKey: getGetGroupSyncStatusQueryKey(), refetchInterval: polling ? 2000 : false, enabled: polling },
+    query: {
+      queryKey: getGetGroupSyncStatusQueryKey(),
+      refetchInterval: polling ? 2000 : 10000,
+    },
   });
+
+  // Augment the type with our extra field
+  const cacheSize = (syncStatus as (typeof syncStatus & { cacheSize?: number }) | undefined)?.cacheSize ?? 0;
 
   useEffect(() => {
     if (!syncStatus) return;
@@ -72,13 +78,8 @@ export default function Groups() {
       if (syncStatus.error) {
         toast({ title: syncStatus.error, variant: "destructive" });
       } else if (syncStatus.lastSync) {
-        const { added, updated, removed, total } = syncStatus.lastSync;
-        const parts: string[] = [];
-        if (added > 0) parts.push(`${added} added`);
-        if (updated > 0) parts.push(`${updated} updated`);
-        if (removed > 0) parts.push(`${removed} removed`);
-        const detail = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-        toast({ title: `Synced ${total} group${total !== 1 ? "s" : ""}${detail}` });
+        const { total } = syncStatus.lastSync;
+        toast({ title: `Synced ${total} group${total !== 1 ? "s" : ""} from WhatsApp` });
       }
     }
     prevStatus.current = syncStatus.status;
@@ -182,11 +183,16 @@ export default function Groups() {
     addContact.mutate(
       { id: selected.id, data: { contactIds: selectedContactIds } },
       {
-        onSuccess: () => {
-          toast({ title: `${selectedContactIds.length} contact${selectedContactIds.length !== 1 ? "s" : ""} added to group` });
+        onSuccess: (data) => {
+          const msg = (data as { message?: string })?.message
+            ?? `${selectedContactIds.length} contact${selectedContactIds.length !== 1 ? "s" : ""} added`;
+          toast({ title: msg });
           setShowAddContact(false);
         },
-        onError: () => toast({ title: "Failed to add contacts", variant: "destructive" }),
+        onError: (err) => {
+          const msg = (err as { data?: { error?: string } })?.data?.error ?? "Failed to add contacts";
+          toast({ title: msg, variant: "destructive" });
+        },
       }
     );
   }
@@ -215,7 +221,11 @@ export default function Groups() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleSync} disabled={syncGroups.isPending || polling}>
             <RefreshCw className={`w-4 h-4 mr-2 ${(syncGroups.isPending || polling) ? "animate-spin" : ""}`} />
-            {polling ? "Syncing…" : "Sync from WhatsApp"}
+            {polling
+              ? "Syncing…"
+              : cacheSize > 0
+              ? `Sync from WhatsApp (${cacheSize})`
+              : "Sync from WhatsApp"}
           </Button>
           <Button onClick={openAdd}>
             <Plus className="w-4 h-4 mr-2" />

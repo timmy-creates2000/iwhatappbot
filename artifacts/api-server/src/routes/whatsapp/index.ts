@@ -157,7 +157,10 @@ router.post("/whatsapp/groups/sync", (req, res): void => {
 
 // Returns current sync state — frontend polls this until status === "idle"
 router.get("/whatsapp/groups/sync/status", (req, res): void => {
-  res.json(syncState);
+  res.json({
+    ...syncState,
+    cacheSize: whatsappService.getCacheSize(),
+  });
 });
 
 export default router;

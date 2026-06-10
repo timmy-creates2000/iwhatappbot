@@ -107,6 +107,10 @@ class WhatsAppService {
     return this.status;
   }
 
+  getCacheSize(): number {
+    return this._groupCache.size;
+  }
+
   getQR(): string | null {
     return this.qr;
   }
