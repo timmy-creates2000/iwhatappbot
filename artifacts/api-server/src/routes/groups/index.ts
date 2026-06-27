@@ -411,12 +411,29 @@ router.get("/groups/:id/participants", async (req, res): Promise<void> => {
       return;
     }
 
-    const result = participants.map((p) => ({
-      jid: p.id,
-      phone: jidToPhone(p.id),
-      name: null as string | null,
-      isAdmin: p.admin === "admin" || p.admin === "superadmin",
-    }));
+    // Build phone → participant map
+    const phones = participants.map((p) => jidToPhone(p.id));
+
+    // Look up any matching contacts in the local DB so we can fill in names
+    const matchedContacts = phones.length > 0
+      ? await db.select({ name: contactsTable.name, phone: contactsTable.phone })
+          .from(contactsTable)
+          .where(inArray(contactsTable.phone, phones))
+      : [];
+
+    const phoneToName = new Map(matchedContacts.map((c) => [c.phone, c.name]));
+
+    const result = participants.map((p) => {
+      const phone = jidToPhone(p.id);
+      // Priority: DB contact name → phone number as fallback label
+      const name = phoneToName.get(phone) ?? `+${phone}`;
+      return {
+        jid: p.id,
+        phone,
+        name,
+        isAdmin: p.admin === "admin" || p.admin === "superadmin",
+      };
+    });
 
     res.json(result);
   } catch (err) {
