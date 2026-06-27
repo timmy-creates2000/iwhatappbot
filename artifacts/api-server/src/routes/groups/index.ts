@@ -20,6 +20,145 @@ function toJid(phone: string): string {
   return `${digits}@s.whatsapp.net`;
 }
 
+/** Extract a phone number from a JID (strip @s.whatsapp.net) */
+function jidToPhone(jid: string): string {
+  return jid.split("@")[0] ?? jid;
+}
+
+// ── Background add-contacts job store ─────────────────────────────────────────
+// Keyed by group DB id. One job per group at a time.
+
+interface AddJob {
+  groupDbId: number;
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  status: "running" | "done" | "error";
+  error?: string;
+  startedAt: Date;
+  finishedAt?: Date;
+}
+
+const addJobs = new Map<number, AddJob>();
+
+/**
+ * Wait up to `timeoutMs` for WhatsApp to reconnect.
+ * Returns true if connected before timeout.
+ */
+async function waitForReconnect(timeoutMs = 120_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (whatsappService.getStatus().connected) return true;
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+  return false;
+}
+
+// WhatsApp status codes from groupParticipantsUpdate:
+//   "200" = success
+//   "403" = forbidden (not admin, or privacy settings)
+//   "408" = number not on WhatsApp
+//   "409" = already in group (treat as success)
+const SUCCESS_CODES = new Set(["200", "409"]);
+
+/**
+ * Background processor — runs after the HTTP response is sent.
+ * Adds contacts one at a time with a configurable delay between each.
+ * Auto-waits if WhatsApp disconnects mid-run.
+ */
+async function runAddJob(
+  job: AddJob,
+  group: { id: number; groupId: string },
+  contacts: Array<{ id: number; phone: string; name: string }>,
+  logIdByContactId: Map<number, number>,
+  delayMs: number
+): Promise<void> {
+  const succeeded: number[] = [];
+  const failed: number[] = [];
+
+  for (const contact of contacts) {
+    if (job.status !== "running") break;
+
+    // If disconnected, wait for reconnect (up to 2 minutes)
+    if (!whatsappService.getStatus().connected) {
+      logger.warn({ groupId: group.groupId }, "WA disconnected mid-run — waiting for reconnect");
+      const reconnected = await waitForReconnect(120_000);
+      if (!reconnected) {
+        job.status = "error";
+        job.error = "WhatsApp disconnected and did not reconnect within 2 minutes";
+        job.finishedAt = new Date();
+        // Mark remaining as failed
+        const remaining = contacts.slice(contacts.indexOf(contact));
+        const remainingIds = remaining
+          .map((c) => logIdByContactId.get(c.id))
+          .filter((id): id is number => id !== undefined);
+        if (remainingIds.length > 0) {
+          await db.update(groupLogsTable).set({ status: "failed" }).where(inArray(groupLogsTable.id, remainingIds));
+        }
+        break;
+      }
+      logger.info("WA reconnected — resuming add-contacts job");
+    }
+
+    try {
+      const statusCode = await whatsappService.addToGroup(group.groupId, toJid(contact.phone));
+      const lid = logIdByContactId.get(contact.id);
+      if (lid !== undefined) {
+        if (SUCCESS_CODES.has(statusCode)) {
+          succeeded.push(lid);
+          job.succeeded++;
+        } else {
+          logger.warn({ statusCode, contactId: contact.id }, "WA rejected participant");
+          failed.push(lid);
+          job.failed++;
+        }
+      }
+    } catch (err) {
+      logger.error({ err, contactId: contact.id }, "Failed to add contact to group");
+      const lid = logIdByContactId.get(contact.id);
+      if (lid !== undefined) failed.push(lid);
+      job.failed++;
+    }
+
+    job.processed++;
+
+    // Flush DB updates in batches of 10 for efficiency
+    if (succeeded.length >= 10) {
+      await db.update(groupLogsTable).set({ status: "added" }).where(inArray(groupLogsTable.id, [...succeeded]));
+      succeeded.length = 0;
+    }
+    if (failed.length >= 10) {
+      await db.update(groupLogsTable).set({ status: "failed" }).where(inArray(groupLogsTable.id, [...failed]));
+      failed.length = 0;
+    }
+
+    // Delay between contacts (skip after the last one)
+    if (contacts.indexOf(contact) < contacts.length - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+
+  // Final flush
+  if (succeeded.length > 0) {
+    await db.update(groupLogsTable).set({ status: "added" }).where(inArray(groupLogsTable.id, succeeded));
+  }
+  if (failed.length > 0) {
+    await db.update(groupLogsTable).set({ status: "failed" }).where(inArray(groupLogsTable.id, failed));
+  }
+
+  if (job.status === "running") {
+    job.status = "done";
+    job.finishedAt = new Date();
+    logger.info(
+      { groupId: group.groupId, succeeded: job.succeeded, failed: job.failed },
+      "Add-contacts job complete"
+    );
+  }
+}
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+
 router.get("/groups", async (req, res): Promise<void> => {
   const groups = await db.select().from(groupsTable).orderBy(groupsTable.createdAt);
   res.json(groups);
@@ -79,7 +218,6 @@ router.delete("/groups/:id", async (req, res): Promise<void> => {
   }
 
   try {
-    // Get the group from DB to find groupId
     const groups = await db
       .select()
       .from(groupsTable)
@@ -92,7 +230,6 @@ router.delete("/groups/:id", async (req, res): Promise<void> => {
 
     const group = groups[0];
 
-    // If group was synced from WhatsApp (has a proper groupId), try to leave it
     if (group.groupId && !group.groupId.startsWith("local-")) {
       try {
         const waStatus = whatsappService.getStatus();
@@ -102,11 +239,9 @@ router.delete("/groups/:id", async (req, res): Promise<void> => {
         }
       } catch (err) {
         logger.warn({ err, groupId: group.groupId }, "Failed to delete group from WhatsApp, removing from DB only");
-        // Continue with DB deletion even if WhatsApp delete fails
       }
     }
 
-    // Delete from database
     const [deletedGroup] = await db
       .delete(groupsTable)
       .where(eq(groupsTable.id, params.data.id))
@@ -124,6 +259,7 @@ router.delete("/groups/:id", async (req, res): Promise<void> => {
   }
 });
 
+/** Start background add-contacts job — returns immediately */
 router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
   const params = AddContactsToGroupParams.safeParse(req.params);
   if (!params.success) {
@@ -152,9 +288,14 @@ router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
     return;
   }
 
-  // Deduplicate incoming contactIds
-  const uniqueIds = [...new Set(parsed.data.contactIds)];
+  // If a job is already running for this group, reject
+  const existing = addJobs.get(params.data.id);
+  if (existing?.status === "running") {
+    res.status(409).json({ error: "An add-contacts job is already running for this group" });
+    return;
+  }
 
+  const uniqueIds = [...new Set(parsed.data.contactIds)];
   if (uniqueIds.length === 0) {
     res.status(400).json({ error: "No contacts selected" });
     return;
@@ -170,68 +311,118 @@ router.post("/groups/:id/add-contacts", async (req, res): Promise<void> => {
     return;
   }
 
-  // Batch-insert all pending log entries up front
+  // Insert all log entries as pending up front
   const logEntries = await db
     .insert(groupLogsTable)
     .values(contacts.map((c) => ({ contactId: c.id, groupId: group.id, status: "pending" })))
     .returning();
 
-  // Map contactId → logEntry id for fast lookup
-  const logById = new Map(logEntries.map((l) => [l.contactId, l.id]));
+  const logIdByContactId = new Map(
+    logEntries
+      .filter((l): l is typeof l & { contactId: number } => l.contactId !== null)
+      .map((l) => [l.contactId, l.id])
+  );
 
-  // Run WhatsApp add calls sequentially with a short delay to avoid rate-limits.
-  // Concurrency of 5 caused bans on larger batches; 1-at-a-time is safer.
-  const CONCURRENCY = 2;
-  const succeeded: number[] = [];
-  const failed: number[] = [];
+  const delayMs = Math.max(500, parsed.data.delayMs ?? 3_000);
 
-  // WhatsApp status codes from groupParticipantsUpdate:
-  //   "200" = success
-  //   "403" = forbidden (not admin, or contact's privacy settings)
-  //   "408" = number not on WhatsApp
-  //   "409" = already in the group (treat as success)
-  const SUCCESS_CODES = new Set(["200", "409"]);
+  const job: AddJob = {
+    groupDbId: params.data.id,
+    total: contacts.length,
+    processed: 0,
+    succeeded: 0,
+    failed: 0,
+    status: "running",
+    startedAt: new Date(),
+  };
+  addJobs.set(params.data.id, job);
 
-  for (let i = 0; i < contacts.length; i += CONCURRENCY) {
-    const batch = contacts.slice(i, i + CONCURRENCY);
-    await Promise.all(
-      batch.map(async (contact) => {
-        try {
-          const statusCode = await whatsappService.addToGroup(group.groupId, toJid(contact.phone));
-          const lid = logById.get(contact.id);
-          if (lid !== undefined) {
-            if (SUCCESS_CODES.has(statusCode)) {
-              succeeded.push(lid);
-            } else {
-              logger.warn({ statusCode, contactId: contact.id, groupId: group.id }, "WhatsApp rejected participant");
-              failed.push(lid);
-            }
-          }
-        } catch (err) {
-          logger.error({ err, contactId: contact.id, groupId: group.id }, "Failed to add contact to group");
-          const lid = logById.get(contact.id);
-          if (lid !== undefined) failed.push(lid);
-        }
-      })
-    );
-    // Brief pause between batches to avoid hitting WhatsApp rate limits
-    if (i + CONCURRENCY < contacts.length) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
+  // Fire and forget — don't await
+  runAddJob(job, group, contacts, logIdByContactId, delayMs).catch((err: unknown) => {
+    logger.error({ err }, "Add-contacts job crashed");
+    job.status = "error";
+    job.error = err instanceof Error ? err.message : "Unknown error";
+    job.finishedAt = new Date();
+  });
+
+  res.status(202).json({
+    success: true,
+    message: `Adding ${contacts.length} contact${contacts.length !== 1 ? "s" : ""} in the background`,
+  });
+});
+
+/** Poll status of the add-contacts background job for this group */
+router.get("/groups/:id/add-contacts/status", (req, res): void => {
+  const rawId = Number(req.params["id"]);
+  if (!Number.isInteger(rawId) || rawId <= 0) {
+    res.status(400).json({ error: "Invalid group id" });
+    return;
   }
 
-  // Batch-update log statuses
-  if (succeeded.length > 0) {
-    await db.update(groupLogsTable).set({ status: "added" }).where(inArray(groupLogsTable.id, succeeded));
-  }
-  if (failed.length > 0) {
-    await db.update(groupLogsTable).set({ status: "failed" }).where(inArray(groupLogsTable.id, failed));
+  const job = addJobs.get(rawId);
+  if (!job) {
+    res.json({ status: "idle" });
+    return;
   }
 
   res.json({
-    success: true,
-    message: `Added ${succeeded.length} contact${succeeded.length !== 1 ? "s" : ""}${failed.length > 0 ? `, ${failed.length} failed` : ""}`,
+    status: job.status,
+    total: job.total,
+    processed: job.processed,
+    succeeded: job.succeeded,
+    failed: job.failed,
+    error: job.error ?? null,
+    startedAt: job.startedAt.toISOString(),
+    finishedAt: job.finishedAt?.toISOString() ?? null,
   });
+});
+
+/** Fetch participants of a synced WhatsApp group */
+router.get("/groups/:id/participants", async (req, res): Promise<void> => {
+  const rawId = Number(req.params["id"]);
+  if (!Number.isInteger(rawId) || rawId <= 0) {
+    res.status(400).json({ error: "Invalid group id" });
+    return;
+  }
+
+  const [group] = await db
+    .select()
+    .from(groupsTable)
+    .where(eq(groupsTable.id, rawId));
+
+  if (!group) {
+    res.status(404).json({ error: "Group not found" });
+    return;
+  }
+
+  if (!group.groupId || group.groupId.startsWith("local-")) {
+    res.status(400).json({ error: "This group is not synced from WhatsApp" });
+    return;
+  }
+
+  if (!whatsappService.getStatus().connected) {
+    res.status(400).json({ error: "WhatsApp is not connected" });
+    return;
+  }
+
+  try {
+    const participants = await whatsappService.getGroupParticipants(group.groupId);
+    if (!participants) {
+      res.status(500).json({ error: "Failed to fetch participants" });
+      return;
+    }
+
+    const result = participants.map((p) => ({
+      jid: p.id,
+      phone: jidToPhone(p.id),
+      name: null as string | null,
+      isAdmin: p.admin === "admin" || p.admin === "superadmin",
+    }));
+
+    res.json(result);
+  } catch (err) {
+    logger.error({ err, groupId: group.groupId }, "Failed to fetch participants");
+    res.status(500).json({ error: "Failed to fetch participants from WhatsApp" });
+  }
 });
 
 export default router;

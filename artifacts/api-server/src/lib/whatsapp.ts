@@ -48,6 +48,7 @@ interface WASocketLike {
   };
   logout(): Promise<void>;
   groupFetchAllParticipating(): Promise<Record<string, GroupInfo>>;
+  groupMetadata(groupId: string): Promise<GroupInfo>;
   groupParticipantsUpdate(id: string, participants: string[], action: string): Promise<Array<{ status: string; jid: string }>>;
   groupLeave(groupId: string): Promise<unknown>;
   sendMessage(jid: string, content: { text: string }): Promise<unknown>;
@@ -454,6 +455,28 @@ class WhatsAppService {
     const results = await this.sock.groupParticipantsUpdate(groupId, [participantJid], "add");
     // results is an array — one entry per participant
     return results[0]?.status ?? "200";
+  }
+
+  /**
+   * Fetches the full participant list for a specific group.
+   * Tries the in-memory cache first (populated by groups.upsert events),
+   * then falls back to a live groupMetadata() call.
+   */
+  async getGroupParticipants(groupId: string): Promise<GroupInfo["participants"] | null> {
+    if (!this.sock || !this.status.connected) return null;
+    // Try cache first
+    const cached = this._groupCache.get(groupId);
+    if (cached?.participants && cached.participants.length > 0) {
+      return cached.participants;
+    }
+    // Live fetch
+    try {
+      const meta = await this.sock.groupMetadata(groupId);
+      return meta.participants ?? [];
+    } catch (err) {
+      logger.error({ err, groupId }, "groupMetadata failed");
+      return null;
+    }
   }
 
   async removeFromGroup(groupId: string, participantJid: string): Promise<void> {

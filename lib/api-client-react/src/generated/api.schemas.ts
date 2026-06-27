@@ -122,6 +122,40 @@ export interface GroupInput {
 
 export interface AddContactsInput {
   contactIds: number[];
+  /** Delay in milliseconds between each add (default 3000, min 500) */
+  delayMs?: number;
+}
+
+export type AddContactsJobStatusStatus = typeof AddContactsJobStatusStatus[keyof typeof AddContactsJobStatusStatus];
+
+
+export const AddContactsJobStatusStatus = {
+  idle: 'idle',
+  running: 'running',
+  done: 'done',
+  error: 'error',
+} as const;
+
+export interface AddContactsJobStatus {
+  status: AddContactsJobStatusStatus;
+  total?: number;
+  processed?: number;
+  succeeded?: number;
+  failed?: number;
+  /** @nullable */
+  error?: string | null;
+  /** @nullable */
+  startedAt?: string | null;
+  /** @nullable */
+  finishedAt?: string | null;
+}
+
+export interface GroupParticipant {
+  jid: string;
+  phone: string;
+  /** @nullable */
+  name?: string | null;
+  isAdmin: boolean;
 }
 
 export interface Campaign {

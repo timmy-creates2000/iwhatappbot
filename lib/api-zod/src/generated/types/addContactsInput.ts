@@ -8,4 +8,6 @@
 
 export interface AddContactsInput {
   contactIds: number[];
+  /** Delay in milliseconds between each add (default 3000, min 500) */
+  delayMs?: number;
 }

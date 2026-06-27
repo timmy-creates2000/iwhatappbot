@@ -8,6 +8,8 @@
 
 export * from './activityItem';
 export * from './addContactsInput';
+export * from './addContactsJobStatus';
+export * from './addContactsJobStatusStatus';
 export * from './bulkContactInput';
 export * from './bulkDeleteInput';
 export * from './bulkImportResult';
@@ -24,6 +26,7 @@ export * from './errorResponse';
 export * from './group';
 export * from './groupInput';
 export * from './groupLog';
+export * from './groupParticipant';
 export * from './groupSyncStatus';
 export * from './groupSyncStatusLastSync';
 export * from './groupSyncStatusStatus';

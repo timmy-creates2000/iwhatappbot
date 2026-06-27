@@ -22,6 +22,7 @@ import type {
 import type {
   ActivityItem,
   AddContactsInput,
+  AddContactsJobStatus,
   BulkContactInput,
   BulkDeleteInput,
   BulkImportResult,
@@ -38,6 +39,7 @@ import type {
   Group,
   GroupInput,
   GroupLog,
+  GroupParticipant,
   GroupSyncStatus,
   HealthStatus,
   ListContactsParams,
@@ -1320,7 +1322,7 @@ export const getAddContactsToGroupUrl = (id: number,) => {
 }
 
 /**
- * @summary Add contacts to a group
+ * @summary Add contacts to a group (runs in background)
  */
 export const addContactsToGroup = async (id: number,
     addContactsInput: AddContactsInput, options?: RequestInit): Promise<SuccessResponse> => {
@@ -1369,7 +1371,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AddContactsToGroupMutationError = ErrorType<unknown>
 
     /**
- * @summary Add contacts to a group
+ * @summary Add contacts to a group (runs in background)
  */
 export const useAddContactsToGroup = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addContactsToGroup>>, TError,{id: number;data: BodyType<AddContactsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -1381,6 +1383,160 @@ export const useAddContactsToGroup = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getAddContactsToGroupMutationOptions(options));
     }
+
+export const getGetAddContactsStatusUrl = (id: number,) => {
+
+
+
+
+  return `/api/groups/${id}/add-contacts/status`
+}
+
+/**
+ * @summary Get the status of the current add-contacts background job
+ */
+export const getAddContactsStatus = async (id: number, options?: RequestInit): Promise<AddContactsJobStatus> => {
+
+  return customFetch<AddContactsJobStatus>(getGetAddContactsStatusUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAddContactsStatusQueryKey = (id: number,) => {
+    return [
+    `/api/groups/${id}/add-contacts/status`
+    ] as const;
+    }
+
+
+export const getGetAddContactsStatusQueryOptions = <TData = Awaited<ReturnType<typeof getAddContactsStatus>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAddContactsStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAddContactsStatusQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAddContactsStatus>>> = ({ signal }) => getAddContactsStatus(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAddContactsStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAddContactsStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getAddContactsStatus>>>
+export type GetAddContactsStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the status of the current add-contacts background job
+ */
+
+export function useGetAddContactsStatus<TData = Awaited<ReturnType<typeof getAddContactsStatus>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAddContactsStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAddContactsStatusQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetGroupParticipantsUrl = (id: number,) => {
+
+
+
+
+  return `/api/groups/${id}/participants`
+}
+
+/**
+ * @summary Fetch participants of a WhatsApp group
+ */
+export const getGroupParticipants = async (id: number, options?: RequestInit): Promise<GroupParticipant[]> => {
+
+  return customFetch<GroupParticipant[]>(getGetGroupParticipantsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetGroupParticipantsQueryKey = (id: number,) => {
+    return [
+    `/api/groups/${id}/participants`
+    ] as const;
+    }
+
+
+export const getGetGroupParticipantsQueryOptions = <TData = Awaited<ReturnType<typeof getGroupParticipants>>, TError = ErrorType<ErrorResponse>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGroupParticipants>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetGroupParticipantsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getGroupParticipants>>> = ({ signal }) => getGroupParticipants(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getGroupParticipants>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetGroupParticipantsQueryResult = NonNullable<Awaited<ReturnType<typeof getGroupParticipants>>>
+export type GetGroupParticipantsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Fetch participants of a WhatsApp group
+ */
+
+export function useGetGroupParticipants<TData = Awaited<ReturnType<typeof getGroupParticipants>>, TError = ErrorType<ErrorResponse>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getGroupParticipants>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetGroupParticipantsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListCampaignsUrl = () => {
 

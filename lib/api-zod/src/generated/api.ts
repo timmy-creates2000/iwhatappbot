@@ -253,20 +253,53 @@ export const DeleteGroupResponse = zod.object({
 
 
 /**
- * @summary Add contacts to a group
+ * @summary Add contacts to a group (runs in background)
  */
 export const AddContactsToGroupParams = zod.object({
   "id": zod.coerce.number()
 })
 
 export const AddContactsToGroupBody = zod.object({
-  "contactIds": zod.array(zod.number())
+  "contactIds": zod.array(zod.number()),
+  "delayMs": zod.number().optional().describe('Delay in milliseconds between each add (default 3000, min 500)')
 })
 
-export const AddContactsToGroupResponse = zod.object({
-  "success": zod.boolean(),
-  "message": zod.string().optional()
+export const AddContactsToGroupResponse = zod.void()
+
+
+/**
+ * @summary Get the status of the current add-contacts background job
+ */
+export const GetAddContactsStatusParams = zod.object({
+  "id": zod.coerce.number()
 })
+
+export const GetAddContactsStatusResponse = zod.object({
+  "status": zod.enum(['idle', 'running', 'done', 'error']),
+  "total": zod.number().optional(),
+  "processed": zod.number().optional(),
+  "succeeded": zod.number().optional(),
+  "failed": zod.number().optional(),
+  "error": zod.string().nullish(),
+  "startedAt": zod.coerce.date().nullish(),
+  "finishedAt": zod.coerce.date().nullish()
+})
+
+
+/**
+ * @summary Fetch participants of a WhatsApp group
+ */
+export const GetGroupParticipantsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetGroupParticipantsResponseItem = zod.object({
+  "jid": zod.string(),
+  "phone": zod.string(),
+  "name": zod.string().nullish(),
+  "isAdmin": zod.boolean()
+})
+export const GetGroupParticipantsResponse = zod.array(GetGroupParticipantsResponseItem)
 
 
 /**

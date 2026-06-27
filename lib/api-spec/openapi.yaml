@@ -323,7 +323,7 @@ paths:
     post:
       operationId: addContactsToGroup
       tags: [groups]
-      summary: Add contacts to a group
+      summary: Add contacts to a group (runs in background)
       parameters:
         - name: id
           in: path
@@ -337,12 +337,58 @@ paths:
             schema:
               $ref: "#/components/schemas/AddContactsInput"
       responses:
-        "200":
-          description: Addition started
+        "202":
+          description: Job started
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
+
+  /groups/{id}/add-contacts/status:
+    get:
+      operationId: getAddContactsStatus
+      tags: [groups]
+      summary: Get the status of the current add-contacts background job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddContactsJobStatus"
+
+  /groups/{id}/participants:
+    get:
+      operationId: getGroupParticipants
+      tags: [groups]
+      summary: Fetch participants of a WhatsApp group
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of participants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GroupParticipant"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   # Campaigns
   /campaigns:
@@ -876,8 +922,52 @@ components:
           type: array
           items:
             type: integer
+        delayMs:
+          type: integer
+          description: Delay in milliseconds between each add (default 3000, min 500)
       required:
         - contactIds
+
+    AddContactsJobStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [idle, running, done, error]
+        total:
+          type: integer
+        processed:
+          type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        error:
+          type: ["string", "null"]
+        startedAt:
+          type: ["string", "null"]
+          format: date-time
+        finishedAt:
+          type: ["string", "null"]
+          format: date-time
+      required:
+        - status
+
+    GroupParticipant:
+      type: object
+      properties:
+        jid:
+          type: string
+        phone:
+          type: string
+        name:
+          type: ["string", "null"]
+        isAdmin:
+          type: boolean
+      required:
+        - jid
+        - phone
+        - isAdmin
 
     Campaign:
       type: object
