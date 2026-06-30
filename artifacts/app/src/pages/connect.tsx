@@ -324,8 +324,9 @@ export default function ConnectPage() {
                             autoComplete="tel"
                           />
                           <p className="text-xs text-muted-foreground">
-                            Include your country code without the + sign.
-                            Nigeria: start with 234 (e.g. 2348012345678).
+                            Nigeria: drop the leading 0 and add 234.
+                            <br />
+                            <strong>Example:</strong> 0801 234 5678 → <span className="font-mono">2348012345678</span>
                           </p>
                         </div>
 
