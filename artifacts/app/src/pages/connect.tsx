@@ -337,7 +337,7 @@ export default function ConnectPage() {
                           {isRequestingCode ? (
                             <>
                               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              Sending code to WhatsApp…
+                              Generating code…
                             </>
                           ) : (
                             "Get Pairing Code"

@@ -52,6 +52,7 @@ interface WASocketLike {
       action: string;
     }) => void): void;
   };
+  end(error?: Error): void;
   logout(): Promise<void>;
   groupFetchAllParticipating(): Promise<Record<string, GroupInfo>>;
   groupMetadata(groupId: string): Promise<GroupInfo>;
@@ -165,17 +166,30 @@ class WhatsAppService {
       throw new Error("Invalid phone number — include country code (e.g. 2348012345678)");
     }
 
+    // Temporarily set intentional flag so the close event on the old socket
+    // does NOT trigger an auto-reconnect while we're restarting for pairing.
+    this._intentionalLogout = true;
+
+    // Forcefully close the existing socket (e.g. the QR-mode socket started on
+    // server boot). Just nulling the reference leaves it running in the
+    // background, where its events interfere with the new pairing socket.
+    if (this.sock) {
+      try { this.sock.end(new Error("Restarting for pairing code")); } catch {}
+      this.sock = null;
+      // Give the old socket a moment to close before starting fresh
+      await new Promise((r) => setTimeout(r, 800));
+    }
+
     // Clear any stale auth files so we start fresh.
     // Leftover partial credentials from a previous QR/pairing attempt can
     // make Baileys think the device is already registered and skip the code.
     this.clearAuthFiles();
 
-    // Tear down any existing (failed/qr) socket so we get a fresh one
+    // Reset everything cleanly
     this._intentionalLogout = false;
     this.initPromise = null;
     this._pairingCode = null;
     this._pairingError = null;
-    this.sock = null;
     this.qr = null;
 
     // Start fresh connection; pairing code will be requested inside _connect()
