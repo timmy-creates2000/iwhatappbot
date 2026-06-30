@@ -345,31 +345,22 @@ export default function ConnectPage() {
                         </Button>
 
                         <div className="text-sm text-center space-y-1 text-muted-foreground">
-                          <p>1. Open WhatsApp on your phone</p>
-                          <p>2. Go to Settings → Linked Devices → Link a Device</p>
-                          <p>3. Tap "Link with phone number instead"</p>
-                          <p>4. Enter the code shown below</p>
+                          <p>Your pairing code will appear here.</p>
+                          <p>You will then type it into WhatsApp yourself.</p>
                         </div>
                       </form>
                     ) : (
                       <div className="flex flex-col items-center space-y-5 w-full">
                         <div className="w-full rounded-xl border-2 border-primary/30 bg-primary/5 p-6 text-center">
                           <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider font-medium">
-                            Your pairing code
+                            Your pairing code — type this in WhatsApp
                           </p>
-                          <p className="text-4xl font-mono font-bold tracking-[0.25em] text-primary">
+                          <p className="text-4xl font-mono font-bold tracking-[0.25em] text-primary select-all">
                             {pairingCode}
                           </p>
                           <p className="text-xs text-muted-foreground mt-3">
-                            Enter this code in WhatsApp within 60 seconds
+                            Open WhatsApp → Linked Devices → Link a Device → "Link with phone number instead" → type the code above
                           </p>
-                        </div>
-
-                        <div className="text-sm text-center space-y-1 text-muted-foreground">
-                          <p>1. Open WhatsApp on your phone</p>
-                          <p>2. Go to Settings → Linked Devices → Link a Device</p>
-                          <p>3. Tap "Link with phone number instead"</p>
-                          <p>4. Type the code shown above</p>
                         </div>
 
                         <div className="flex flex-col items-center gap-2 w-full">
