@@ -56,6 +56,16 @@ export interface WhatsAppQR {
   status: string;
 }
 
+export interface PairingCodeRequest {
+  /** Phone number with country code, digits only (e.g. 2348012345678) */
+  phone: string;
+}
+
+export interface PairingCodeResponse {
+  /** 8-character pairing code (formatted as XXXX-XXXX) to enter in WhatsApp */
+  code: string;
+}
+
 export interface Contact {
   id: number;
   name: string;

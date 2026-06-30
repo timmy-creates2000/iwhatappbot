@@ -1,2 +1,4 @@
 - [libsql native binary fix](libsql-native-fix.md) — esbuild bundle can't resolve libsql native binary; requires symlinks in api-server node_modules.
 - [PORT env var conflict](port-env-conflict.md) — don't set PORT as a shared env var; each service sets its own via workflow command or artifact.toml.
+- [DB setup for dev](db-dev-setup.md) — uses libSQL/SQLite (not Postgres), needs TURSO_DATABASE_URL with absolute path and drizzle-kit push.
+- [Baileys pairing code timing](baileys-pairing-code.md) — requestPairingCode() must be called right after makeWASocket() before QR fires; check authState.creds.registered first.

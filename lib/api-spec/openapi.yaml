@@ -68,6 +68,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/WhatsAppQR"
 
+  /whatsapp/pair:
+    post:
+      operationId: requestPairingCode
+      tags: [whatsapp]
+      summary: Request a WhatsApp pairing code for a phone number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PairingCodeRequest"
+      responses:
+        "200":
+          description: Pairing code generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairingCodeResponse"
+        "400":
+          description: Invalid phone number
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to generate pairing code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /whatsapp/logout:
     post:
       operationId: logoutWhatsApp
@@ -783,6 +820,24 @@ components:
           type: string
       required:
         - status
+
+    PairingCodeRequest:
+      type: object
+      properties:
+        phone:
+          type: string
+          description: Phone number with country code, digits only (e.g. 2348012345678)
+      required:
+        - phone
+
+    PairingCodeResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          description: 8-character pairing code (formatted as XXXX-XXXX) to enter in WhatsApp
+      required:
+        - code
 
     Contact:
       type: object

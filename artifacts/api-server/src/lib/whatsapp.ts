@@ -36,6 +36,7 @@ interface WAMessageKey {
 
 interface WASocketLike {
   user?: { id?: string; name?: string };
+  authState?: { creds?: { registered?: boolean } };
   ev: {
     on(event: "creds.update", handler: () => void): void;
     on(event: "connection.update", handler: (update: {
@@ -45,6 +46,11 @@ interface WASocketLike {
     }) => void): void;
     on(event: "groups.upsert", handler: (groups: GroupInfo[]) => void): void;
     on(event: "groups.update", handler: (updates: GroupUpdate[]) => void): void;
+    on(event: "group-participants.update", handler: (update: {
+      id: string;
+      participants: string[];
+      action: string;
+    }) => void): void;
   };
   logout(): Promise<void>;
   groupFetchAllParticipating(): Promise<Record<string, GroupInfo>>;
@@ -52,6 +58,7 @@ interface WASocketLike {
   groupParticipantsUpdate(id: string, participants: string[], action: string): Promise<Array<{ status: string; jid: string }>>;
   groupLeave(groupId: string): Promise<unknown>;
   sendMessage(jid: string, content: { text: string }): Promise<unknown>;
+  requestPairingCode(phone: string): Promise<string>;
 }
 
 export function toJid(phone: string): string {
@@ -85,6 +92,7 @@ async function upsertGroups(groups: GroupInfo[]): Promise<void> {
 class WhatsAppService {
   private sock: WASocketLike | null = null;
   private qr: string | null = null;
+  private _pairingCode: string | null = null;
   private status: WhatsAppStatusData = {
     connected: false,
     status: "disconnected",
@@ -104,6 +112,11 @@ class WhatsAppService {
   // we rely on these events for a complete picture.
   private _groupCache = new Map<string, GroupInfo>();
 
+  // Tracks participants who left or were removed per group (groupId → Set<jid>).
+  // Persists for the lifetime of the server process so the add-contacts job
+  // can skip re-adding people who voluntarily left.
+  private _leftParticipants = new Map<string, Set<string>>();
+
   getStatus(): WhatsAppStatusData {
     return this.status;
   }
@@ -116,6 +129,18 @@ class WhatsAppService {
     return this.qr;
   }
 
+  getPairingCode(): string | null {
+    return this._pairingCode;
+  }
+
+  /**
+   * Returns the set of JIDs that have previously left or been removed from a
+   * specific group. Used by the add-contacts job to avoid re-adding people.
+   */
+  getPreviouslyLeft(groupId: string): Set<string> {
+    return this._leftParticipants.get(groupId) ?? new Set();
+  }
+
   initialize(): Promise<void> {
     if (this.initPromise) return this.initPromise;
     this._intentionalLogout = false;
@@ -123,7 +148,43 @@ class WhatsAppService {
     return this.initPromise;
   }
 
-  private async _connect(): Promise<void> {
+  /**
+   * Request a WhatsApp pairing code for the given phone number.
+   * The phone should include the country code (e.g. "2348012345678").
+   * Returns the 8-character code that WhatsApp sends to the user's device.
+   */
+  async requestPairingCode(phone: string): Promise<string> {
+    if (this.status.connected) {
+      throw new Error("Already connected to WhatsApp. Disconnect first.");
+    }
+
+    // Clean: digits only, strip leading +
+    const cleanPhone = phone.replace(/\D/g, "");
+    if (!cleanPhone || cleanPhone.length < 7) {
+      throw new Error("Invalid phone number — include country code (e.g. 2348012345678)");
+    }
+
+    // Tear down any existing (failed/qr) socket so we get a fresh one
+    this._intentionalLogout = false;
+    this.initPromise = null;
+    this._pairingCode = null;
+    this.sock = null;
+    this.qr = null;
+
+    // Start fresh connection; pairing code will be requested inside _connect()
+    this.initPromise = this._connect(cleanPhone);
+
+    // Wait up to 20 seconds for the code to arrive
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      if (this._pairingCode) return this._pairingCode;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    throw new Error("Timed out waiting for pairing code. Make sure the phone number is correct and registered on WhatsApp.");
+  }
+
+  private async _connect(pairingPhone?: string): Promise<void> {
     if (this._intentionalLogout) return;
 
     try {
@@ -159,6 +220,29 @@ class WhatsAppService {
       this.sock = sock;
       sock.ev.on("creds.update", saveCreds);
 
+      // ── Pairing code mode: request code right after socket creation ───────
+      // This must happen before the QR event fires so WhatsApp uses pairing
+      // code flow instead of QR. Only request if creds are not yet registered.
+      if (pairingPhone) {
+        const isRegistered = sock.authState?.creds?.registered ?? false;
+        if (!isRegistered) {
+          try {
+            const code = await sock.requestPairingCode(pairingPhone);
+            // Format as XXXX-XXXX for readability
+            this._pairingCode = code.length === 8
+              ? `${code.slice(0, 4)}-${code.slice(4)}`
+              : code;
+            this.status = { ...this.status, status: "pairing_code_ready" };
+            logger.info({ pairingCode: this._pairingCode }, "Pairing code generated");
+          } catch (pairErr) {
+            logger.error({ err: pairErr }, "Failed to request pairing code");
+            // Fall through — connection will still proceed (may show QR instead)
+          }
+        } else {
+          logger.info("Creds already registered — skipping pairing code request");
+        }
+      }
+
       // ── Connection lifecycle ──────────────────────────────────────────────
       sock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -176,6 +260,7 @@ class WhatsAppService {
 
         if (connection === "open") {
           this.qr = null;
+          this._pairingCode = null; // Pairing complete — clear the code
           this._intentionalLogout = false;
           this._connectedSince = Date.now();
           this._reconnectAttempt = 0; // stable connection — reset backoff
@@ -242,18 +327,21 @@ class WhatsAppService {
             return;
           }
 
-          if (statusCode === DisconnectReason.connectionReplaced) {
-            // Another WhatsApp Web session opened — the other session won, don't fight it
-            logger.warn("Connection replaced by another session — not reconnecting");
-            this.initPromise = null;
-            return;
-          }
-
           if (statusCode === DisconnectReason.badSession) {
             // Corrupted session files — wipe them and start fresh with QR
             logger.warn("Bad session — clearing auth and resetting");
             this.clearAuthFiles();
             this.initPromise = null;
+            return;
+          }
+
+          // connectionReplaced — another web session opened. Wait briefly then
+          // reconnect so this server regains control of the session.
+          if (statusCode === DisconnectReason.connectionReplaced) {
+            logger.warn("Connection replaced — will reconnect in 5s to resume control");
+            setTimeout(() => {
+              this.initPromise = this._connect();
+            }, 5_000);
             return;
           }
 
@@ -280,9 +368,6 @@ class WhatsAppService {
 
       sock.ev.on("groups.upsert", (groups) => {
         if (!groups.length) return;
-        // Populate cache — covers all groups including those beyond the 50-cap
-        // of groupFetchAllParticipating. WhatsApp streams every group the user
-        // belongs to through this event during the initial connection handshake.
         for (const g of groups) {
           this._groupCache.set(g.id, g);
         }
@@ -297,7 +382,6 @@ class WhatsAppService {
         );
         if (!relevant.length) return;
 
-        // Keep cache in sync so manual sync reflects latest group state
         for (const u of relevant) {
           const cached = this._groupCache.get(u.id);
           if (cached) {
@@ -324,6 +408,23 @@ class WhatsAppService {
           .catch((err: unknown) => logger.error({ err }, "groups.update DB error"));
       });
 
+      // ── Track participants who leave or get removed ───────────────────────
+      sock.ev.on("group-participants.update", ({ id, participants, action }) => {
+        if (action === "remove" || action === "leave") {
+          if (!this._leftParticipants.has(id)) {
+            this._leftParticipants.set(id, new Set());
+          }
+          const leftSet = this._leftParticipants.get(id)!;
+          for (const jid of participants) {
+            leftSet.add(jid);
+          }
+          logger.info(
+            { groupId: id, action, count: participants.length },
+            "Tracked participants who left/were removed — will not be re-added"
+          );
+        }
+      });
+
     } catch (err) {
       logger.warn({ err }, "Baileys failed to initialize — WhatsApp features disabled");
       this.status = {
@@ -338,24 +439,13 @@ class WhatsAppService {
   /**
    * Full sync on first connect — waits for WhatsApp to stream all groups via
    * groups.upsert events (which have no cap), then upserts the full cache to DB.
-   *
-   * We intentionally do NOT delete stale rows here because
-   * groupFetchAllParticipating() is hard-capped at ~50 groups by WhatsApp's
-   * protocol — using it for deletion would wrongly remove groups 51+.
-   * The groups.upsert event stream covers every group, so the DB naturally
-   * stays in sync as real-time events arrive.
    */
   private async _initialGroupSync(): Promise<void> {
-    // Give Baileys time to receive the full groups.upsert stream from WhatsApp.
-    // The stream is usually complete within a few seconds but we wait 15s to be
-    // safe for accounts with many groups.
     await new Promise((resolve) => setTimeout(resolve, 15_000));
 
     const cached = Array.from(this._groupCache.values());
 
     if (cached.length === 0) {
-      // Cache is empty — fall back to the direct API call as a best-effort.
-      // This will only return up to ~50 groups but is better than nothing.
       const fetched = await this.fetchGroups();
       if (fetched && fetched.length > 0) {
         await upsertGroups(fetched);
@@ -393,9 +483,11 @@ class WhatsAppService {
 
     this.sock = null;
     this.qr = null;
+    this._pairingCode = null;
     this._connectedSince = null;
     this._reconnectAttempt = 0;
     this._groupCache.clear();
+    this._leftParticipants.clear();
     this.status = {
       connected: false,
       status: "disconnected",
@@ -419,7 +511,6 @@ class WhatsAppService {
       logger.info({ total: cached.length }, "Returning groups from cache");
       return cached;
     }
-    // Cache empty — fall back to direct API (capped at ~50 by WhatsApp)
     return this.fetchGroups();
   }
 
@@ -453,7 +544,6 @@ class WhatsAppService {
       throw new Error("Not connected to WhatsApp");
     }
     const results = await this.sock.groupParticipantsUpdate(groupId, [participantJid], "add");
-    // results is an array — one entry per participant
     return results[0]?.status ?? "200";
   }
 

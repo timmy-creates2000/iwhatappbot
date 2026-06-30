@@ -66,6 +66,10 @@ const SUCCESS_CODES = new Set(["200", "409"]);
  * Background processor — runs after the HTTP response is sent.
  * Adds contacts one at a time with a configurable delay between each.
  * Auto-waits if WhatsApp disconnects mid-run.
+ *
+ * Skip logic (two cases):
+ *  1. Contact is already in the group → mark "skipped", count as success, no delay.
+ *  2. Contact previously left/was removed from the group → mark "left_before", count as failed, no delay.
  */
 async function runAddJob(
   job: AddJob,
@@ -74,11 +78,55 @@ async function runAddJob(
   logIdByContactId: Map<number, number>,
   delayMs: number
 ): Promise<void> {
+  // ── Pre-flight: fetch current participants to detect already-present contacts ─
+  const currentParticipants = await whatsappService.getGroupParticipants(group.groupId) ?? [];
+  // Build a Set of raw digit strings (no @ suffix) for fast phone lookup
+  const currentPhoneSet = new Set(
+    currentParticipants.map((p) => p.id.split("@")[0] ?? "")
+  );
+
+  // ── Get participants who previously left this group ───────────────────────
+  const previouslyLeft = whatsappService.getPreviouslyLeft(group.groupId);
+
   const succeeded: number[] = [];
   const failed: number[] = [];
+  const skipped: number[] = [];      // already in group
+  const leftBefore: number[] = [];   // previously left — do not re-add
 
   for (const contact of contacts) {
     if (job.status !== "running") break;
+
+    // Normalize phone to digits-only (strip leading +) for comparison
+    const normalizedPhone = contact.phone.startsWith("+")
+      ? contact.phone.slice(1)
+      : contact.phone;
+    const contactJid = toJid(contact.phone);
+
+    // ── Skip: already in the group ────────────────────────────────────────
+    if (currentPhoneSet.has(normalizedPhone)) {
+      logger.info(
+        { contactId: contact.id, phone: contact.phone },
+        "Contact already in group — skipping"
+      );
+      const lid = logIdByContactId.get(contact.id);
+      if (lid !== undefined) skipped.push(lid);
+      job.processed++;
+      job.succeeded++; // Already there = effectively a success
+      continue;
+    }
+
+    // ── Skip: previously left/removed — respect their choice ─────────────
+    if (previouslyLeft.has(contactJid)) {
+      logger.info(
+        { contactId: contact.id, phone: contact.phone },
+        "Contact previously left group — skipping re-add"
+      );
+      const lid = logIdByContactId.get(contact.id);
+      if (lid !== undefined) leftBefore.push(lid);
+      job.processed++;
+      job.failed++;
+      continue;
+    }
 
     // If disconnected, wait for reconnect (up to 2 minutes)
     if (!whatsappService.getStatus().connected) {
@@ -102,12 +150,15 @@ async function runAddJob(
     }
 
     try {
-      const statusCode = await whatsappService.addToGroup(group.groupId, toJid(contact.phone));
+      const statusCode = await whatsappService.addToGroup(group.groupId, contactJid);
       const lid = logIdByContactId.get(contact.id);
       if (lid !== undefined) {
         if (SUCCESS_CODES.has(statusCode)) {
           succeeded.push(lid);
           job.succeeded++;
+          // Track as now-in-group so subsequent contacts in the same batch
+          // don't attempt to add the same number twice
+          currentPhoneSet.add(normalizedPhone);
         } else {
           logger.warn({ statusCode, contactId: contact.id }, "WA rejected participant");
           failed.push(lid);
@@ -146,12 +197,24 @@ async function runAddJob(
   if (failed.length > 0) {
     await db.update(groupLogsTable).set({ status: "failed" }).where(inArray(groupLogsTable.id, failed));
   }
+  if (skipped.length > 0) {
+    await db.update(groupLogsTable).set({ status: "skipped" }).where(inArray(groupLogsTable.id, skipped));
+  }
+  if (leftBefore.length > 0) {
+    await db.update(groupLogsTable).set({ status: "left_before" }).where(inArray(groupLogsTable.id, leftBefore));
+  }
 
   if (job.status === "running") {
     job.status = "done";
     job.finishedAt = new Date();
     logger.info(
-      { groupId: group.groupId, succeeded: job.succeeded, failed: job.failed },
+      {
+        groupId: group.groupId,
+        succeeded: job.succeeded,
+        failed: job.failed,
+        skipped: skipped.length,
+        leftBefore: leftBefore.length,
+      },
       "Add-contacts job complete"
     );
   }

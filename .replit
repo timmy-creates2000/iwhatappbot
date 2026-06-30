@@ -1,4 +1,4 @@
-modules = ["nodejs-18", "web", "bash"]
+modules = ["web", "bash", "nodejs-24"]
 
 [deployment]
 router = "application"
@@ -47,10 +47,6 @@ externalPort = 3003
 
 [[ports]]
 localPort = 5000
-externalPort = 5000
-
-[[ports]]
-localPort = 8080
 externalPort = 80
 
 [[ports]]
@@ -78,6 +74,9 @@ LOG_LEVEL = "info"
 NODE_ENV = "development"
 ALLOWED_ORIGIN = ""
 PORT = "8080"
+
+[userenv.development]
+TURSO_DATABASE_URL = "file:/home/runner/workspace/dev.db"
 
 [nix]
 channel = "stable-25_05"

@@ -1,12 +1,29 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { useGetWhatsAppStatus, useGetWhatsAppQR, useLogoutWhatsApp, getGetWhatsAppStatusQueryKey, getGetWhatsAppQRQueryKey } from "@workspace/api-client-react";
+import {
+  useGetWhatsAppStatus,
+  useGetWhatsAppQR,
+  useLogoutWhatsApp,
+  getGetWhatsAppStatusQueryKey,
+  getGetWhatsAppQRQueryKey,
+} from "@workspace/api-client-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Smartphone, ShieldCheck, Loader2, Lock, LogOut, Eye, EyeOff } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Smartphone,
+  ShieldCheck,
+  Loader2,
+  Lock,
+  LogOut,
+  Eye,
+  EyeOff,
+  QrCode,
+  Hash,
+} from "lucide-react";
 import { getStoredPassword, storePassword, clearPassword } from "@/lib/app-password";
 import { useToast } from "@/hooks/use-toast";
 
@@ -22,6 +39,11 @@ export default function ConnectPage() {
   );
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // Pairing code state
+  const [pairingPhone, setPairingPhone] = useState("");
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [isRequestingCode, setIsRequestingCode] = useState(false);
+
   // WhatsApp status — always public, no password needed
   const { data: statusData, isLoading: isLoadingStatus } = useGetWhatsAppStatus({
     query: { queryKey: getGetWhatsAppStatusQueryKey(), refetchInterval: 3000 },
@@ -29,7 +51,6 @@ export default function ConnectPage() {
   const isConnected = statusData?.connected;
 
   // QR — only fetched after password is verified
-  // Poll every 2 s so we pick up the QR as soon as Baileys generates it
   const { data: qrData, isLoading: isLoadingQR, error: qrError } = useGetWhatsAppQR({
     query: {
       queryKey: getGetWhatsAppQRQueryKey(),
@@ -51,6 +72,13 @@ export default function ConnectPage() {
     }
   }, [isConnected, setLocation]);
 
+  // Clear pairing code once connected
+  useEffect(() => {
+    if (isConnected) {
+      setPairingCode(null);
+    }
+  }, [isConnected]);
+
   // If QR returns 401 the stored password is wrong — clear it
   useEffect(() => {
     if (qrError && (qrError as { status?: number }).status === 401) {
@@ -66,8 +94,6 @@ export default function ConnectPage() {
 
     setIsVerifying(true);
     try {
-      // Probe the QR endpoint with the supplied password to verify it.
-      // Use VITE_API_URL as the base when set (Render), else relative path (Replit/local).
       const base = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
       const res = await fetch(`${base}/api/whatsapp/qr`, {
         headers: { "x-app-password": password },
@@ -78,7 +104,6 @@ export default function ConnectPage() {
         return;
       }
 
-      // 409 = already connected — password is valid, redirect to dashboard
       if (res.status === 409) {
         storePassword(password);
         setAuthedPassword(password);
@@ -86,7 +111,6 @@ export default function ConnectPage() {
         return;
       }
 
-      // 200 — password correct, show QR
       storePassword(password);
       setAuthedPassword(password);
     } finally {
@@ -95,13 +119,54 @@ export default function ConnectPage() {
     }
   }
 
+  async function handleRequestPairingCode(e: React.FormEvent) {
+    e.preventDefault();
+    const phone = pairingPhone.trim().replace(/\D/g, "");
+    if (!phone) return;
+
+    setIsRequestingCode(true);
+    setPairingCode(null);
+
+    try {
+      const base = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
+      const res = await fetch(`${base}/api/whatsapp/pair`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-app-password": authedPassword ?? "",
+        },
+        body: JSON.stringify({ phone }),
+      });
+
+      const data = (await res.json()) as { code?: string; error?: string };
+
+      if (!res.ok) {
+        toast({
+          title: "Failed to get pairing code",
+          description: data.error ?? "Please check the phone number and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setPairingCode(data.code ?? null);
+    } catch {
+      toast({
+        title: "Network error",
+        description: "Could not reach the server. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRequestingCode(false);
+    }
+  }
+
   function handleDisconnect() {
     if (!authedPassword) return;
     logout.mutate(undefined, {
       onSuccess: () => {
-        toast({ title: "Disconnected — scan QR to connect a new number" });
-        // Keep authedPassword so QR screen shows immediately (no re-enter password)
-        // The QR polling will pick up the new QR code automatically
+        setPairingCode(null);
+        toast({ title: "Disconnected — connect a new number via QR or pairing code" });
       },
       onError: () => {
         toast({ title: "Failed to disconnect", variant: "destructive" });
@@ -146,7 +211,6 @@ export default function ConnectPage() {
               </p>
               <p className="text-xs text-muted-foreground">Redirecting to dashboard...</p>
 
-              {/* Allow disconnect only if the password is already unlocked */}
               {authedPassword && (
                 <Button
                   variant="destructive"
@@ -202,40 +266,149 @@ export default function ConnectPage() {
             </form>
 
           ) : (
-            /* ── QR code (password verified, not yet connected) ── */
-            <div className="flex flex-col items-center w-full py-4 space-y-6">
-              <div className="bg-white p-4 rounded-lg shadow-sm border border-border w-64 h-64 flex items-center justify-center relative">
-                {qrData?.qr ? (
-                  <img src={qrData.qr} alt="WhatsApp QR Code" className="w-full h-full object-contain" />
-                ) : (
-                  <div className="flex flex-col items-center gap-3 text-center px-4">
-                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                    <p className="text-xs text-muted-foreground">
-                      {isLoadingQR ? "Loading…" : "Connecting to WhatsApp, QR code will appear shortly…"}
-                    </p>
+            /* ── Connection options (password verified, not yet connected) ── */
+            <div className="w-full py-4">
+              <Tabs defaultValue="qr" className="w-full">
+                <TabsList className="w-full mb-6">
+                  <TabsTrigger value="qr" className="flex-1 gap-2">
+                    <QrCode className="w-4 h-4" />
+                    QR Code
+                  </TabsTrigger>
+                  <TabsTrigger value="pairing" className="flex-1 gap-2">
+                    <Hash className="w-4 h-4" />
+                    Pairing Code
+                  </TabsTrigger>
+                </TabsList>
+
+                {/* ── QR Code tab ── */}
+                <TabsContent value="qr">
+                  <div className="flex flex-col items-center space-y-6">
+                    <div className="bg-white p-4 rounded-lg shadow-sm border border-border w-64 h-64 flex items-center justify-center relative">
+                      {qrData?.qr ? (
+                        <img src={qrData.qr} alt="WhatsApp QR Code" className="w-full h-full object-contain" />
+                      ) : (
+                        <div className="flex flex-col items-center gap-3 text-center px-4">
+                          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                          <p className="text-xs text-muted-foreground">
+                            {isLoadingQR ? "Loading…" : "Connecting to WhatsApp, QR code will appear shortly…"}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-sm text-center space-y-2 text-muted-foreground max-w-xs">
+                      <p>1. Open WhatsApp on your phone</p>
+                      <p>2. Tap Menu or Settings and select Linked Devices</p>
+                      <p>3. Tap on Link a Device</p>
+                      <p>4. Point your phone to this screen to capture the code</p>
+                    </div>
                   </div>
-                )}
-              </div>
+                </TabsContent>
 
-              <div className="text-sm text-center space-y-2 text-muted-foreground max-w-xs">
-                <p>1. Open WhatsApp on your phone</p>
-                <p>2. Tap Menu or Settings and select Linked Devices</p>
-                <p>3. Tap on Link a Device</p>
-                <p>4. Point your phone to this screen to capture the code</p>
-              </div>
+                {/* ── Pairing Code tab ── */}
+                <TabsContent value="pairing">
+                  <div className="flex flex-col items-center space-y-6">
+                    {!pairingCode ? (
+                      <form onSubmit={handleRequestPairingCode} className="w-full space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="pairing-phone" className="text-sm font-medium text-foreground">
+                            Phone Number
+                          </Label>
+                          <Input
+                            id="pairing-phone"
+                            type="tel"
+                            value={pairingPhone}
+                            onChange={(e) => setPairingPhone(e.target.value)}
+                            placeholder="e.g. 2348012345678"
+                            className="font-mono"
+                            autoComplete="tel"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Include your country code without the + sign.
+                            Nigeria: start with 234 (e.g. 2348012345678).
+                          </p>
+                        </div>
 
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-destructive border-destructive/50 hover:bg-destructive/10"
-                onClick={() => {
-                  clearPassword();
-                  setAuthedPassword(null);
-                }}
-              >
-                <Lock className="w-3 h-3 mr-2" />
-                Lock this page
-              </Button>
+                        <Button
+                          type="submit"
+                          className="w-full"
+                          disabled={isRequestingCode || !pairingPhone.trim()}
+                        >
+                          {isRequestingCode ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Sending code to WhatsApp…
+                            </>
+                          ) : (
+                            "Get Pairing Code"
+                          )}
+                        </Button>
+
+                        <div className="text-sm text-center space-y-1 text-muted-foreground">
+                          <p>1. Open WhatsApp on your phone</p>
+                          <p>2. Go to Settings → Linked Devices → Link a Device</p>
+                          <p>3. Tap "Link with phone number instead"</p>
+                          <p>4. Enter the code shown below</p>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="flex flex-col items-center space-y-5 w-full">
+                        <div className="w-full rounded-xl border-2 border-primary/30 bg-primary/5 p-6 text-center">
+                          <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider font-medium">
+                            Your pairing code
+                          </p>
+                          <p className="text-4xl font-mono font-bold tracking-[0.25em] text-primary">
+                            {pairingCode}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-3">
+                            Enter this code in WhatsApp within 60 seconds
+                          </p>
+                        </div>
+
+                        <div className="text-sm text-center space-y-1 text-muted-foreground">
+                          <p>1. Open WhatsApp on your phone</p>
+                          <p>2. Go to Settings → Linked Devices → Link a Device</p>
+                          <p>3. Tap "Link with phone number instead"</p>
+                          <p>4. Type the code shown above</p>
+                        </div>
+
+                        <div className="flex flex-col items-center gap-2 w-full">
+                          <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                          <p className="text-xs text-muted-foreground">Waiting for you to enter the code…</p>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => {
+                            setPairingCode(null);
+                            setPairingPhone("");
+                          }}
+                        >
+                          Try a different number
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
+
+              <div className="mt-6 flex justify-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground text-xs"
+                  onClick={() => {
+                    clearPassword();
+                    setAuthedPassword(null);
+                    setPairingCode(null);
+                  }}
+                >
+                  <Lock className="w-3 h-3 mr-2" />
+                  Lock this page
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>

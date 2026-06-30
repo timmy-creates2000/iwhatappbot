@@ -37,6 +37,8 @@ export * from './listMessageLogsParams';
 export * from './messageLog';
 export * from './messageTemplate';
 export * from './messageTemplateInput';
+export * from './pairingCodeRequest';
+export * from './pairingCodeResponse';
 export * from './successResponse';
 export * from './whatsAppQR';
 export * from './whatsAppStatus';

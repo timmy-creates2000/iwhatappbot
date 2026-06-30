@@ -71,6 +71,30 @@ async function runGroupSync(): Promise<void> {
   };
 }
 
+// Request a pairing code for a phone number (alternative to QR scan)
+router.post("/whatsapp/pair", async (req, res): Promise<void> => {
+  const { phone } = req.body as { phone?: string };
+
+  if (!phone || typeof phone !== "string") {
+    res.status(400).json({ error: "phone is required (e.g. 2348012345678)" });
+    return;
+  }
+
+  const status = whatsappService.getStatus();
+  if (status.connected) {
+    res.status(409).json({ error: "Already connected. Disconnect first." });
+    return;
+  }
+
+  try {
+    const code = await whatsappService.requestPairingCode(phone.trim());
+    res.json({ code });
+  } catch (err) {
+    logger.error({ err }, "Failed to generate pairing code");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to generate pairing code" });
+  }
+});
+
 // Protected — only the owner can see the QR code
 router.get("/whatsapp/qr", async (req, res): Promise<void> => {
   const status = whatsappService.getStatus();

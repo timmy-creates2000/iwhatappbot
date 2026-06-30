@@ -37,6 +37,18 @@ export const GetWhatsAppQRResponse = zod.object({
 
 
 /**
+ * @summary Request a WhatsApp pairing code for a phone number
+ */
+export const RequestPairingCodeBody = zod.object({
+  "phone": zod.string().describe('Phone number with country code, digits only (e.g. 2348012345678)')
+})
+
+export const RequestPairingCodeResponse = zod.object({
+  "code": zod.string().describe('8-character pairing code (formatted as XXXX-XXXX) to enter in WhatsApp')
+})
+
+
+/**
  * @summary Logout from WhatsApp
  */
 export const LogoutWhatsAppResponse = zod.object({
