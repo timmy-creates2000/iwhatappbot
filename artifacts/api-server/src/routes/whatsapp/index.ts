@@ -103,8 +103,12 @@ router.get("/whatsapp/qr", async (req, res): Promise<void> => {
     return;
   }
 
-  // Auto-initialize so QR is ready on first poll after logout
-  if (status.status === "disconnected") {
+  // Auto-initialize ONLY on first load (no socket yet) or after a clean logout.
+  // Do NOT auto-init if the socket is null because the QR timed out or the
+  // user is on the pairing code tab — in those cases the client controls when
+  // to start a new connection. Spinning up a QR socket here would fight the
+  // pairing code flow.
+  if (status.status === "disconnected" && !whatsappService.isConnecting()) {
     whatsappService.initialize().catch(() => {});
   }
 

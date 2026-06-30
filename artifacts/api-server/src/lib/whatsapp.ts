@@ -131,6 +131,11 @@ class WhatsAppService {
     return this.qr;
   }
 
+  /** True if a socket connection attempt is currently underway. */
+  isConnecting(): boolean {
+    return this.initPromise !== null;
+  }
+
   getPairingCode(): string | null {
     return this._pairingCode;
   }

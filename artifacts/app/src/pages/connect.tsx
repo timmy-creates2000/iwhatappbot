@@ -44,17 +44,25 @@ export default function ConnectPage() {
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [isRequestingCode, setIsRequestingCode] = useState(false);
 
+  // Track active tab so we can stop QR polling when on the Pairing tab.
+  // QR polling auto-calls initialize() on the server every 2s — if it keeps
+  // running while the user requests a pairing code, it constantly recreates
+  // a QR socket that fights with the pairing socket.
+  const [activeTab, setActiveTab] = useState<"qr" | "pairing">("qr");
+
   // WhatsApp status — always public, no password needed
   const { data: statusData, isLoading: isLoadingStatus } = useGetWhatsAppStatus({
     query: { queryKey: getGetWhatsAppStatusQueryKey(), refetchInterval: 3000 },
   });
   const isConnected = statusData?.connected;
 
-  // QR — only fetched after password is verified
+  // QR — only fetched after password is verified AND we are on the QR tab.
+  // Disabling this when on the Pairing tab stops the server from spinning up
+  // a new QR socket every 2s, which would interfere with pairing code flow.
   const { data: qrData, isLoading: isLoadingQR, error: qrError } = useGetWhatsAppQR({
     query: {
       queryKey: getGetWhatsAppQRQueryKey(),
-      enabled: !!authedPassword && !isConnected,
+      enabled: !!authedPassword && !isConnected && activeTab === "qr",
       refetchInterval: 2000,
       retry: false,
     },
@@ -268,7 +276,11 @@ export default function ConnectPage() {
           ) : (
             /* ── Connection options (password verified, not yet connected) ── */
             <div className="w-full py-4">
-              <Tabs defaultValue="qr" className="w-full">
+              <Tabs
+                value={activeTab}
+                onValueChange={(v) => setActiveTab(v as "qr" | "pairing")}
+                className="w-full"
+              >
                 <TabsList className="w-full mb-6">
                   <TabsTrigger value="qr" className="flex-1 gap-2">
                     <QrCode className="w-4 h-4" />
