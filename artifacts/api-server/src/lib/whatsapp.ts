@@ -93,6 +93,7 @@ class WhatsAppService {
   private sock: WASocketLike | null = null;
   private qr: string | null = null;
   private _pairingCode: string | null = null;
+  private _pairingError: string | null = null;
   private status: WhatsAppStatusData = {
     connected: false,
     status: "disconnected",
@@ -151,7 +152,7 @@ class WhatsAppService {
   /**
    * Request a WhatsApp pairing code for the given phone number.
    * The phone should include the country code (e.g. "2348012345678").
-   * Returns the 8-character code that WhatsApp sends to the user's device.
+   * Returns the formatted XXXX-XXXX code the user types into WhatsApp.
    */
   async requestPairingCode(phone: string): Promise<string> {
     if (this.status.connected) {
@@ -164,24 +165,33 @@ class WhatsAppService {
       throw new Error("Invalid phone number — include country code (e.g. 2348012345678)");
     }
 
+    // Clear any stale auth files so we start fresh.
+    // Leftover partial credentials from a previous QR/pairing attempt can
+    // make Baileys think the device is already registered and skip the code.
+    this.clearAuthFiles();
+
     // Tear down any existing (failed/qr) socket so we get a fresh one
     this._intentionalLogout = false;
     this.initPromise = null;
     this._pairingCode = null;
+    this._pairingError = null;
     this.sock = null;
     this.qr = null;
 
     // Start fresh connection; pairing code will be requested inside _connect()
     this.initPromise = this._connect(cleanPhone);
 
-    // Wait up to 20 seconds for the code to arrive
-    const deadline = Date.now() + 20_000;
+    // Wait up to 30 seconds for the code to arrive (or an error to surface)
+    const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       if (this._pairingCode) return this._pairingCode;
+      if (this._pairingError) throw new Error(this._pairingError);
       await new Promise((r) => setTimeout(r, 500));
     }
 
-    throw new Error("Timed out waiting for pairing code. Make sure the phone number is correct and registered on WhatsApp.");
+    throw new Error(
+      "Timed out waiting for pairing code. Make sure the phone number is correct and registered on WhatsApp."
+    );
   }
 
   private async _connect(pairingPhone?: string): Promise<void> {
@@ -221,25 +231,24 @@ class WhatsAppService {
       sock.ev.on("creds.update", saveCreds);
 
       // ── Pairing code mode: request code right after socket creation ───────
-      // This must happen before the QR event fires so WhatsApp uses pairing
-      // code flow instead of QR. Only request if creds are not yet registered.
+      // Must be called before QR fires so WhatsApp uses pairing code flow.
       if (pairingPhone) {
-        const isRegistered = sock.authState?.creds?.registered ?? false;
-        if (!isRegistered) {
-          try {
-            const code = await sock.requestPairingCode(pairingPhone);
-            // Format as XXXX-XXXX for readability
-            this._pairingCode = code.length === 8
-              ? `${code.slice(0, 4)}-${code.slice(4)}`
-              : code;
-            this.status = { ...this.status, status: "pairing_code_ready" };
-            logger.info({ pairingCode: this._pairingCode }, "Pairing code generated");
-          } catch (pairErr) {
-            logger.error({ err: pairErr }, "Failed to request pairing code");
-            // Fall through — connection will still proceed (may show QR instead)
-          }
-        } else {
-          logger.info("Creds already registered — skipping pairing code request");
+        try {
+          logger.info({ phone: pairingPhone }, "Requesting pairing code from WhatsApp…");
+          const code = await sock.requestPairingCode(pairingPhone);
+          // Format as XXXX-XXXX for readability
+          this._pairingCode = code.length === 8
+            ? `${code.slice(0, 4)}-${code.slice(4)}`
+            : code;
+          this._pairingError = null;
+          this.status = { ...this.status, status: "pairing_code_ready" };
+          logger.info({ pairingCode: this._pairingCode }, "Pairing code generated successfully");
+        } catch (pairErr) {
+          const msg = pairErr instanceof Error ? pairErr.message : String(pairErr);
+          logger.error({ err: pairErr, phone: pairingPhone }, "Failed to request pairing code");
+          this._pairingError = `WhatsApp rejected the pairing code request: ${msg}`;
+          // Don't fall through to QR — surface the error to the caller
+          return;
         }
       }
 
@@ -283,6 +292,7 @@ class WhatsAppService {
         if (connection === "close") {
           const boom = lastDisconnect?.error as InstanceType<typeof Boom> | undefined;
           const statusCode = boom?.output?.statusCode;
+          const errorMessage = boom?.message ?? "";
 
           // If last connection was stable (>30s), reset backoff for next attempt
           if (this._connectedSince && Date.now() - this._connectedSince > 30_000) {
@@ -300,12 +310,23 @@ class WhatsAppService {
           };
 
           logger.info(
-            { statusCode, intentionalLogout: this._intentionalLogout },
+            { statusCode, intentionalLogout: this._intentionalLogout, errorMessage },
             "Connection closed"
           );
 
           if (this._intentionalLogout) {
             logger.info("Intentional logout — not reconnecting");
+            return;
+          }
+
+          // ── QR timed out (nobody scanned) — stop the loop ───────────────
+          // Baileys throws statusCode 408 with message "QR refs attempts ended"
+          // when the QR is never scanned. We must NOT auto-reconnect here or we
+          // get an infinite QR generation loop. Wait for the user to manually
+          // request a new QR or pairing code.
+          if (statusCode === DisconnectReason.timedOut && errorMessage.includes("QR refs")) {
+            logger.info("QR code timed out (not scanned) — waiting for user to reconnect manually");
+            this.initPromise = null;
             return;
           }
 
@@ -484,6 +505,7 @@ class WhatsAppService {
     this.sock = null;
     this.qr = null;
     this._pairingCode = null;
+    this._pairingError = null;
     this._connectedSince = null;
     this._reconnectAttempt = 0;
     this._groupCache.clear();
